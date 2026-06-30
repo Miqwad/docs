@@ -1,16 +1,16 @@
 # Team Plan — Frontend (sole frontend engineer)
 
-**Role.** Customer RN app + dealer/admin web + every flow across all three surfaces, **and the UI itself — there is no separate designer.** Works from the typed API client generated from the OpenAPI spec. To make one builder viable across three surfaces, the UI is an **off-the-shelf component library** (a ready-made React + React-Native kit) themed with **minimal brand tokens** (Pine/Brass/Sand, IBM Plex Sans Arabic + Sora) — **not** a bespoke Storybook/Style-Dictionary design system, which is deferred to post-V1. Utilitarian-but-usable beats polished-but-late; **full RTL + basic a11y are non-negotiable**; the kit's built-in states cover the rest. **Admin is kept deliberately thin.**
+**Role.** Customer RN app + dealer/admin web + every flow across all three surfaces, **and the UI itself — there is no separate designer; the FE engineer works as a design-engineer.** Works from the typed API client generated from the OpenAPI spec. The leverage that makes one builder viable across three surfaces is the **shared `@miqwad/design-system`** — **Style Dictionary** tokens (web CSS vars + RN JS theme) and a **Storybook** component library — **built once and reused across all three surfaces** (Pine/Brass/Sand, IBM Plex Sans Arabic + Sora). **Full RTL + a11y are non-negotiable** and ship in every component. **Admin is kept deliberately thin**, composing the shared library rather than growing its own UI.
 
-> **This is the plan's #1 capacity risk** (one builder, three surfaces, no designer) — protected by the kit, the thin admin, **dealer-OS surfaces first**, ruthless reuse, and the generated API client (never blocked on contracts). Feature scope is kept; design-system polish is the sacrifice.
+> **This is the plan's #1 capacity risk** (one builder, three surfaces, no separate designer) — mitigated precisely by the **build-once design system** (the multiplier), the thin admin, **dealer-OS surfaces first**, ruthless reuse, and the generated API client (never blocked on contracts). Feature scope and the 3-month target are kept.
 
 **Weeks map to sprints:** W1–2 = S1 (M1) · W3–4 = S2 · W5–6 = S3 (**M2 FE**) · W7–8 = S4 · W9–10 = S5 (**M3**) · W11–12 = S6 (**M4**).
 
 ## Prep
-- **Pick the component kit** and wire **minimal brand tokens** (web + RN); no bespoke design system.
-- Boot the three shells: RN (Expo Router) customer app + dealer (React) + admin (React) with **auth + package-gated navigation + full RTL**.
+- **Stand up `@miqwad/design-system`:** Style Dictionary tokens (web + RN) + the core Storybook components (Button, Input, Select, Table, Card, StatusChip, Money, DateRange, Modal, …), each shipping hover/focus/active + loading/empty/error + RTL/a11y states. Grow the library as surfaces need it.
+- Boot the three shells: RN (Expo Router) customer app + dealer (web) + admin (web) with **auth + package-gated navigation + full RTL**.
 - TanStack Query + Zustand; a typed API client generated from the OpenAPI spec (two small adapters: REST + Elide JSON:API).
-- Co-author doc **18 (frontend architecture)**.
+- Maintain the frontend architecture spec: [design/frontend-design-system.md](../../design/frontend-design-system.md).
 
 ## Weeks
 - **W1:** dealer auth + dashboard shell + admin approval/package-assignment.
@@ -26,4 +26,4 @@
 - **W11:** import wizard UI + notifications + reviews + connection wizard + package/tier UI.
 - **W12:** cross-surface cleanup, a11y/RTL pass, offline, EAS build/submit + forced-update policy. → **M4**.
 
-*Reuse relentlessly; lean on the kit's components and states. Pairs with: Mid/Senior BE (API contracts, sagas, marketplace). Detail in doc 18; release/forced-update policy in docs 18 §7 / 19 §11.*
+*Reuse relentlessly; every screen composes `@miqwad/design-system` components. Pairs with: Mid/Senior BE (API contracts, sagas, marketplace). Detail in [design/frontend-design-system.md](../../design/frontend-design-system.md); release/forced-update policy in its React Native section and [engineering/devops.md](../../engineering/devops.md).*
