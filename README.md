@@ -68,7 +68,8 @@ docs/
   delivery/
     project-plan.md           prep → sprints → milestones → risks
     backlog.md                epics → stories → acceptance criteria
-    roles.md                  per-role responsibilities
+    roles.md                  team split (2 BE + 1 FE + MBA) + index
+    team/                     per-person week-by-week plans
 
   diagrams/                   Mermaid sources
 ```
@@ -79,7 +80,7 @@ docs/
 
 - **New joiner (any role):** [00-overview.md](00-overview.md) → [architecture/README.md](architecture/README.md) → [engineering/onboarding.md](engineering/onboarding.md) → [STATUS.md](STATUS.md).
 - **Backend engineer:** [architecture/README.md](architecture/README.md) → [data-model.md](architecture/data-model.md) → [api/reference.md](api/reference.md) → [sagas-outbox-jobs.md](architecture/sagas-outbox-jobs.md) → [integrations.md](architecture/integrations.md) → [engineering/stack.md](engineering/stack.md) → [decisions/adr-log.md](decisions/adr-log.md).
-- **Frontend engineer:** [design/brand.md](design/brand.md) → [design/frontend-design-system.md](design/frontend-design-system.md) → [api/reference.md](api/reference.md) → [product/use-cases.md](product/use-cases.md). *(Note: web-portal framework is 🔵 Open — see [STATUS.md](STATUS.md).)*
+- **Frontend engineer (sole; owns the UI):** [delivery/team/frontend.md](delivery/team/frontend.md) → [api/reference.md](api/reference.md) → [product/use-cases.md](product/use-cases.md) → [design/brand.md](design/brand.md) (tokens). *(No designer: build on an off-the-shelf component kit; bespoke design system deferred. Web-portal framework is low-stakes 🔵 Open — see [STATUS.md](STATUS.md).)*
 - **Product / PM:** [product/requirements.md](product/requirements.md) → [product/use-cases.md](product/use-cases.md) → [product/pricing-packaging.md](product/pricing-packaging.md) → [delivery/](delivery/).
 - **Compliance / integrations:** [architecture/integrations.md](architecture/integrations.md) → [architecture/security.md](architecture/security.md) → [STATUS.md](STATUS.md) (provisional vendor contracts).
 

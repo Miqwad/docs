@@ -2,7 +2,7 @@
 
 Ship the full V1 — rental operating system **and** customer marketplace — in **3 months / six 2-week sprints**, preceded by a flexible prep phase that ends at a Definition-of-Ready.
 
-> Companion docs: [backlog.md](backlog.md) (epics → stories), [roles.md](roles.md) (per-role plans), [../decisions/adr-log.md](../decisions/adr-log.md), [../STATUS.md](../STATUS.md).
+> Companion docs: [backlog.md](backlog.md) (epics → stories), [roles.md](roles.md) (roles index) + [team/](team/) (per-person week-by-week plans), [../decisions/adr-log.md](../decisions/adr-log.md), [../STATUS.md](../STATUS.md).
 
 ---
 
@@ -31,7 +31,7 @@ V1 is the complete platform: the rental OS, the customer marketplace, all four S
 | **Frontend** | All three surfaces — customer RN app + dealer + admin web — on an **off-the-shelf component library** + minimal brand tokens, driven by the typed OpenAPI client; bespoke design system deferred |
 | **MBA / business** | Legal + **government-credentials critical path** + packaging/pricing + pilot onboarding + PM/UAT |
 
-Per-person week-by-week plans are in [roles.md](roles.md). **Backend split:** Senior BE = the cross-cutting/infra/money/saga spine; Mid BE = the domain depth + breadth. They pair only on the sagas and the money/billing ledger.
+Per-person week-by-week plans are in [team/](team/) (indexed from [roles.md](roles.md)). **Backend split:** Senior BE = the cross-cutting/infra/money/saga spine; Mid BE = the domain depth + breadth. They pair only on the sagas and the money/billing ledger.
 
 ---
 
