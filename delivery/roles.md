@@ -1,8 +1,10 @@
 # Miqwad — Team Roles & Plans (V1)
 
-One concise section per role, condensed from each person's week-by-week plan. One person per role; no dedicated QA or DevOps.
+One concise section per role, condensed from each person's week-by-week plan. The team is **3 engineers (2 backend + 1 frontend) + the MBA/business owner**; **no dedicated UI/UX designer, QA, or DevOps** — the frontend engineer owns the UI (off-the-shelf components), the Senior BE owns CI/CD + infra, everyone runs TDD, and the MBA runs UAT.
 
 > Companion docs: [project-plan.md](project-plan.md) (sprints, milestones), [backlog.md](backlog.md) (epics → stories). Weeks map to sprints: W1–2 = S1 (M1) · W3–4 = S2 · W5–6 = S3 (M2) · W7–8 = S4 · W9–10 = S5 (M3) · W11–12 = S6 (M4).
+>
+> **Backend split (so the two BE engineers rarely block each other):** Senior BE owns the cross-cutting/infra/money/saga spine; Mid BE owns the domain depth + breadth. They pair only on the sagas and the money/billing ledger.
 
 ---
 
@@ -20,7 +22,7 @@ One concise section per role, condensed from each person's week-by-week plan. On
 - **S5** — full marketplace search/listing/quote + telemetry ingest + live-map API (PostGIS) + `marketplace_compliance` flag; Wasl + maintenance + delivery + one-way + settlement/commission + subscription billing (+ platform ZATCA invoice with Senior BE). → **M3**
 - **S6** — import/migration (full historical) + export pipeline + reports/exports; reviews + Saher + branch perms + consolidated reporting + admin KPIs; coverage to target. → **M4**
 
-**Pairs with.** Senior BE (tenancy, money, return-settle saga, billing ledger); Senior FE (booking/confirm/marketplace APIs); MBA (packaging, migration data, UAT).
+**Pairs with.** Senior BE (tenancy, money, return-settle saga, billing ledger); Frontend (booking/confirm/marketplace APIs); MBA (packaging, migration data, UAT).
 
 ---
 
@@ -28,7 +30,7 @@ One concise section per role, condensed from each person's week-by-week plan. On
 
 **Responsibilities.** Owns the scaffold, CI/CD, GCP environments, and the hardest infra (tenancy, pooling, security pass, perf gates). Reviews the Mid BE's crown-jewel work and pairs on the sagas. Acts as mentor/reviewer.
 
-**Prep.** Scaffold Spring Modulith on Kotlin/Boot 4 (Gradle Kotlin DSL, `kotlin-spring`/`kotlin-jpa`/KSP), Flyway baseline + extensions, CI/CD + GCP staging, JobRunr/outbox wiring, Detekt/ktlint + ArchUnit. Co-author the schema, adapters, errors, devops, ADR, cloud, security, and performance docs. Co-design tenancy + entitlement with the Mid BE; run the Boot-4 dependency check (O9); drive CNTXT/GCP procurement (O8) with MBA.
+**Prep.** Scaffold Spring Modulith on Kotlin/Boot 4 (Gradle Kotlin DSL, `kotlin-spring`/`kotlin-jpa`/KSP), Flyway baseline + extensions, CI/CD + GCP staging, JobRunr/outbox wiring, Detekt/ktlint + ArchUnit. Co-author the schema, adapters, errors, devops, ADR, cloud, security, and performance docs. Co-design tenancy + entitlement with the Mid BE; run the Boot-4 dependency check (O9); drive CNTXT/GCP procurement (O8) with MBA. *(The walking-skeleton scaffold is done — see [github.com/Miqwad/backend](https://github.com/Miqwad/backend).)*
 
 **Focus by sprint.**
 - **S1** — tenancy (`@TenantId` + RLS + coroutine-safe tenant context per ADR-003) + Keycloak auth + JWT claims (co-own); the cross-tenant-leak test must pass **before feature work**. Entitlement enforcement engine (module/limit/package gates) + branch/staff authz; Moyasar adapter start. → **M1**
@@ -38,43 +40,27 @@ One concise section per role, condensed from each person's week-by-week plan. On
 - **S5** — connection pooling / PgBouncer (ADR-002) + telemetry storage (native partitions / pg_partman job) + read-replica wiring; settlement/billing ledger side + platform ZATCA invoice (co) + Wasl adapter support. → **M3**
 - **S6** — security pass (rate limits, vault, PDPL workflow) + free-tier limit enforcement; load test + perf-SLO CI gates + DR drill + release hardening. → **M4**
 
-**Pairs with.** Mid BE (sagas, money, billing); Senior FE (auth/JWT contract); MBA (credentials, CNTXT).
+**Pairs with.** Mid BE (sagas, money, billing); Frontend (auth/JWT contract); MBA (credentials, CNTXT).
 
 ---
 
-## Senior Frontend — customer app + dealer/admin web
+## Frontend — all three surfaces (sole frontend engineer)
 
-**Responsibilities.** Builds the customer RN app, the dealer/admin web portals, and the complex flows across all three surfaces. Works from the typed API client (generated from the OpenAPI spec) and the shared design system the UI/UX engineer owns.
+**Responsibilities.** Builds the customer RN app + dealer + admin web and every flow across them, **and owns the UI directly — there is no separate designer.** Works from the typed API client generated from the OpenAPI spec. To make one builder viable across three surfaces, the UI is an **off-the-shelf component library** (a ready-made React + React-Native kit) themed with **minimal brand tokens** (Pine/Brass/Sand, IBM Plex Sans Arabic + Sora) — **not** a bespoke Storybook/Style-Dictionary design system, which is deferred to post-V1. Utilitarian-but-usable beats polished-but-late; **full RTL + basic a11y are non-negotiable**, the kit's built-in states cover the rest. **Admin is kept deliberately thin.**
 
-**Prep.** Boot the three shells — RN (Expo Router) customer app + dealer (React) + admin (React) — with auth + package-gated navigation + full RTL. Set up TanStack Query + Zustand and a typed API client (two small adapters: REST + Elide JSON:API). Co-author the frontend architecture & design-system doc.
+**Prep.** Pick the component kit and wire minimal brand tokens (web + RN). Boot the three shells — RN (Expo Router) customer app + dealer (React) + admin (React) — with auth + package-gated navigation + full RTL. TanStack Query + Zustand; typed API client (REST + Elide JSON:API adapters). Co-author the frontend doc.
 
 **Focus by sprint.**
 - **S1** — dealer auth + dashboard shell + admin approval/package-assignment; fleet screens (vehicle CRUD / images / rate plans). → **M1**
 - **S2** — dealer availability calendar + gated nav; dealer booking entry (all channels) + quote.
 - **S3** — dealer confirm + Tajeer status + payment wiring; customer app shell + book-a-vehicle + Moyasar pay. → **M2 (FE side)**
 - **S4** — handover/return capture (camera / geotag / checklist) + damage; customer booking detail (photos / contract / invoice / refund).
-- **S5** — customer marketplace search / listing / filters / map (discovery); tracking map (MapLibre) + maintenance + delivery + finance/settlement + plan/billing screens. → **M3**
-- **S6** — import wizard UI + notifications + reviews + connection wizard + package/tier UI; cross-surface polish, a11y/RTL, offline, EAS build/submit + forced-update policy. → **M4**
+- **S5** — customer marketplace search / listing / filters / map; tracking map (MapLibre) + maintenance + delivery + finance/settlement + plan/billing. → **M3**
+- **S6** — import wizard UI + notifications + reviews + connection wizard + package/tier UI; cross-surface cleanup, a11y/RTL pass, offline, EAS build/submit + forced-update policy. → **M4**
 
-**Pairs with.** UI/UX (components, tokens, states); Mid/Senior BE (API contracts, sagas, marketplace).
+**The plan's #1 risk.** One builder + no designer across three surfaces — protected by the off-the-shelf kit, the thin admin, the dealer-OS-first order, ruthless reuse, and the generated API client (never blocked on contracts). Feature scope is kept; design-system polish is the sacrifice.
 
----
-
-## UI/UX — design-engineer
-
-**Responsibilities.** Design system owner **and** a builder of screens (giving the team ~2 effective frontend builders). Owns tokens, the component library, hi-fi flows, and the a11y/RTL bar; partners with the Senior FE on every surface. Every component ships hover/focus/active + RTL + a11y states.
-
-**Prep.** Build tokens (Style Dictionary) from the brand doc (Pine/Brass/Sand, IBM Plex Sans Arabic + Sora) for web + RN. Build the Storybook component library; hi-fi flows for the booking loop, handover, package onboarding, and the import wizard. Co-author the a11y/RTL guide.
-
-**Focus by sprint.**
-- **S1** — production component library; admin + package-assignment screens; fleet components. → **M1**
-- **S2** — availability calendar + booking/quote components.
-- **S3** — confirm/payment components + customer book flow; empty/error/loading states. → **M2**
-- **S4** — inspection photo-capture UX + damage + invoice/receipt PDF styling.
-- **S5** — marketplace search/map UI + tracking + maintenance + delivery + finance charts (Recharts) + plan/billing. → **M3**
-- **S6** — notifications, reviews, connection wizard, package/tier comparison, admin KPIs; visual QA at 320/375/768/1024/1440, RTL/AR pass, a11y sign-off. → **M4**
-
-**Pairs with.** Senior FE (every surface); Mid BE (packaging/onboarding flows).
+**Pairs with.** Mid/Senior BE (API contracts, sagas, marketplace).
 
 ---
 

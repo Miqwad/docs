@@ -20,19 +20,18 @@ V1 is the complete platform: the rental OS, the customer marketplace, all four S
 | Payments | Moyasar |
 | Cloud | GCP me-central2 (Dammam) |
 
-## The team
+## The team — 3 engineers + a business owner
 
-One person per role; no dedicated QA or DevOps. Senior BE owns CI/CD + infra; everyone runs TDD; MBA runs UAT.
+**2 backend + 1 frontend engineer, plus the MBA/business owner. No dedicated UI/UX designer, QA, or DevOps:** the frontend engineer absorbs UI (an **off-the-shelf component library**, not a bespoke design system), the Senior BE owns CI/CD + infra, everyone runs TDD, and the MBA runs UAT + the legal/credentials critical path. The backend is split cleanly so the two BE engineers rarely block each other.
 
 | Role | Focus |
 |---|---|
-| UI/UX (design-engineer) | Design system owner + builds screens |
-| Senior Backend | Depth partner + infra/CI-CD + mentor/reviewer |
-| Mid Backend | Deep domain owner (design author); crown-jewels + breadth |
-| Senior Frontend | Customer RN app + dealer/admin web + complex flows |
-| MBA | Legal/credentials critical path + packaging + onboarding + PM/UAT |
+| **Senior Backend** | Infra + CI/CD + GCP + **tenancy, money/ledger, sagas, perf & security pass**; reviewer/depth partner |
+| **Mid Backend** | **Deep domain owner** (design author): crown-jewels (availability, booking, ZATCA/Tajeer) + breadth (fleet, marketplace, ops) + export pipeline |
+| **Frontend** | All three surfaces — customer RN app + dealer + admin web — on an **off-the-shelf component library** + minimal brand tokens, driven by the typed OpenAPI client; bespoke design system deferred |
+| **MBA / business** | Legal + **government-credentials critical path** + packaging/pricing + pilot onboarding + PM/UAT |
 
-Per-person week-by-week plans are condensed in [roles.md](roles.md).
+Per-person week-by-week plans are in [roles.md](roles.md). **Backend split:** Senior BE = the cross-cutting/infra/money/saga spine; Mid BE = the domain depth + breadth. They pair only on the sagas and the money/billing ledger.
 
 ---
 
@@ -44,7 +43,7 @@ The flexible run-up absorbs all design and credential lead time. Prep is "done" 
 |---|---|
 | Deep-design docs reviewed; physical schema **migrates on Testcontainers**; CI green | SB / MB |
 | **Tenancy + entitlement gating proven** on a sample module (cross-tenant-leak test passes) | SB / MB |
-| Design system covers the core flows | UX |
+| Off-the-shelf component library + brand tokens wired into the FE shells (auth + gated nav + RTL) | Frontend |
 | **Government sandbox credentials applied for** (Moyasar + Tajeer expected to land in S1–S3) | MBA (from week 0) |
 | **GCP / CNTXT procurement underway** (O8); **Boot-4 dependency check done** (O9) | SB + MBA |
 | **Packaging matrix signed off** | MBA + MB |
@@ -88,8 +87,8 @@ Build outward from the core in strict dependency order. Sprints map onto these l
 
 | Risk | Mitigation |
 |---|---|
-| **Full V1 in 3 months** (largest risk) | Flexible prep absorbs design + credentials; libraries delete work (JobRunr, pg_partman, PostGIS, Togglz); **core-first sequencing** (booking loop live by S3/W6); weekly priority-order checkpoint |
-| **One FE dev for three surfaces** | UI/UX as design-engineer (~2 effective builders); **thin admin**; shared design system. Accepted |
+| **Full V1 in 3 months with only 3 engineers** (largest risk; accepted) | Flexible prep absorbs credentials + scaffolding; libraries delete work (JobRunr, pg_partman, PostGIS, Togglz); **core-first sequencing** (booking loop live by S3/W6); weekly priority-order checkpoint |
+| **One frontend engineer for three surfaces, no designer** (now the #1 capacity risk; accepted) | Build on an **off-the-shelf component library** (no bespoke design-system work) + minimal brand tokens; **thin admin**; **dealer-OS surfaces first**; ruthless reuse; the typed API client is generated from OpenAPI so the FE never blocks on contracts. **Design-system polish is the explicit sacrifice, deferred to post-V1** — feature scope is kept. |
 | **Full historical migration** (compliance-sensitive) | Validate + quarantine; **imported gov docs never re-submitted**; cutover runbook; MBA dry-runs real data by W8 |
 | **Gov-credential + GCP/CNTXT lead times** | MBA starts week 0; build vs WireMock; Togglz-gate per dealer |
 | **Entitlement gating is cross-cutting** | Built in prep/S1, before breadth |
