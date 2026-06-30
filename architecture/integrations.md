@@ -2,9 +2,11 @@
 
 One spec per external system Miqwad talks to: purpose, operations, credential handling, and resilience. Every adapter sits behind a Kotlin interface (the domain depends on the interface, never the wire) and is driven through the outbox wherever it mutates money or contracts.
 
-> ## 🟡 Contract detail is **Provisional**
+> ## 🟡 Contract detail is **mostly Provisional** — ZATCA + Moyasar now ✅ in hand
 >
-> The **adapter approach is Decided**: provider-agnostic ports behind a dedicated circuit breaker per system, credential-gated, fetching secrets from the vault at call time. The **request/response shapes are Provisional** — they are refined on receipt of official vendor docs + credential onboarding. See [STATUS](../STATUS.md) **P-1..P-6**.
+> The **adapter approach is Decided**: provider-agnostic ports behind a dedicated circuit breaker per system, credential-gated, fetching secrets from the vault at call time.
+>
+> **✅ Vendor docs received 2026-06-30 for ZATCA (P-2) and Moyasar (P-5)** — their sections below carry the real contracts. **🟡 Still Provisional (no vendor docs yet):** Tajeer (P-1), Wasl (P-3), Absher (P-4), notifications (P-6) — their request/response shapes are refined on receipt of official vendor docs + credential onboarding. See [STATUS](../STATUS.md) **P-1..P-6**.
 >
 > **Payments are Moyasar only.** Cross-links: [ADR-014](../decisions/adr-log.md#adr-014--zatca-phase-2-wrap-the-official-sdk) (ZATCA SDK) · [ADR-015](../decisions/adr-log.md#adr-015--payments-moyasar) (Moyasar) · [ADR-016](../decisions/adr-log.md#adr-016--api-surface-hand-written-rest-v1-for-the-domain--elide-jsonapi-for-crud) (API surface).
 
@@ -44,19 +46,32 @@ Adapters are built against **WireMock** until sandbox access lands, so developme
 
 ---
 
-## 2. ZATCA Phase 2 — e-invoicing (Fatoora) 🟡 P-2
+## 2. ZATCA Phase 2 — e-invoicing (Fatoora) ✅ contract in hand (vendor docs received 2026-06-30)
 
-**Purpose.** Generate signed UBL 2.1 XML + TLV QR, then **clear** (B2C simplified) or **report** (B2B standard) to ZATCA. Serves two directions: `dealer_to_customer` and `platform_to_dealer` (Miqwad billing dealers). Signing **wraps the official ZATCA SDK** — see [ADR-014](../decisions/adr-log.md#adr-014--zatca-phase-2-wrap-the-official-sdk).
+**Purpose.** Generate a signed UBL 2.1 invoice + TLV QR, then **Clear** (Standard / B2B, synchronous) or **Report** (Simplified / B2C, async) via the **Fatoora API v2**. Serves two directions: `dealer_to_customer` and `platform_to_dealer` (Miqwad billing dealers). Signing uses the **official ZATCA SDK — see [ADR-014](../decisions/adr-log.md#adr-014--zatca-phase-2-wrap-the-official-sdk).**
+
+> ### ✅ Decided: **official ZATCA SDK R4.0.0 embedded IN-PROCESS** — no sidecar, no reimplementation
+>
+> The SDK is run **in-process inside the JDK 25 modular monolith** (it targets Java 21 / Santuario 4.0.2 / a modern stack — verified to load & run on Java 21, and runs on JDK 25 by backward-compatibility). We do **not** reimplement the cryptographic stamping and we do **not** stand up a sidecar. **Caveats:** (1) the scaffold adds a **smoke test of a real sign on JDK 25** as an acceptance gate; (2) onboard against the **GA R4.x** line (R4.0.0 is beta, shipping `3.0-SNAPSHOT` internal libs); (3) **fallback only if the JDK-25 smoke test fails** = pin just the ZATCA path to a Java-21 toolchain (the rest of the monolith stays on JDK 25).
+
+**Split of work — SDK (offline) vs adapter (online):**
+
+| Half | Where | What |
+|---|---|---|
+| **Offline** | Embedded SDK, in-process | **CSR generation**, **XAdES sign/stamp** (secp256k1 / SHA-256), **TLV QR**, **invoice hash**, **PIH-chain**, and **local validation** (XSD + EN16931 + ZATCA Schematron) — all before any network call |
+| **Online** | The adapter | Calls **Fatoora API v2** (header `accept-version: v2`, HTTP Basic = **PCSID username + secret password**) to **Clear** (Standard/B2B — synchronous; ZATCA co-stamps before the invoice reaches the buyer) or **Report** (Simplified/B2C — async, self-stamped, ≤24h) |
 
 | | |
 |---|---|
-| **Operations** | `sign(invoiceXml) → {hash, qr}` (official ZATCA SDK, offline) · `clear(invoice)` / `report(invoice) → zatcaUuid` · `status(invoiceId)` |
-| **Credentials** | Per-dealer **CSID** (compliance / production) for dealer invoices; **Miqwad's own CSID** for platform→dealer invoices. In the vault |
-| **Resilience** | Signing is local and fast; clearance timeout ~15s + retry queue; breaker |
-| **Error codes** | Validation reject → `zatca_failed` (details carry the ZATCA error) · clearance timeout → invoice `pending_clearance` (retry queue; the car is **not** stranded) |
+| **Operations** | `generateCsr(config)` · `sign(invoiceXml) → {hash, qr, signedXml}` (SDK, offline) · `validate(signedXml)` (SDK, offline — XSD + EN16931 + Schematron) · `clear(invoice)` / `report(invoice) → zatcaUuid` (Fatoora v2) · `status(invoiceId)` |
+| **CSID onboarding (per EGS)** | CSR from a `.properties` config (VAT number — 15 digits, starts/ends `3`; EGS serial `1-…\|2-…\|3-<UUID>`; invoice-type `1100` = Standard + Simplified; branch address; …) → **Compliance CSID** (issued against an **OTP**) → compliance checks (one sample invoice per document type) → **Production CSID + secret (PCSID)**. **Sandbox** uses the `-nonprod` / `-sim` endpoints |
+| **Invoice shape** | **UBL 2.1 `<Invoice>` always** (even for credit/debit notes). Type code in the element (**388** invoice / **383** debit / **381** credit) + a `name` attr whose first 2 digits = **`01` Standard** vs **`02` Simplified**. Carries **`ICV`** (invoice counter), **`PIH`** (prev-invoice-hash, base64 — **the first invoice uses the fixed seed** = base64 SHA-256 of `"0"`), and **`QR`** (base64 TLV, 9 tags incl. **tag 9 = ZATCA CA stamp** for Simplified). The XAdES signature lives in `UBLExtensions` |
+| **Credentials** | Per-dealer **CSID/PCSID** (compliance → production) for dealer invoices; **Miqwad's OWN platform EGS + CSID** (separate ZATCA onboarding) for platform→dealer (commission / SaaS) Standard B2B invoices. All in the vault — **never committed** (see §[.gitignore], KMS/Vault only) |
+| **Resilience** | Signing/validation is local and fast; clearance timeout ~15s + retry queue; **dedicated breaker**; **idempotent on invoice `uuid`/hash**. **Compensation:** a failed clearance **rolls back booking-confirm exactly like a Tajeer failure** — *money is never held against a rental that doesn't legally exist* (see [sagas-outbox-jobs.md](sagas-outbox-jobs.md)) |
+| **Error codes** | Validation reject → `zatca_failed` (details carry the ZATCA/Schematron error) · clearance timeout → invoice `pending_clearance` (retry queue; the car is **not** stranded) |
 | **Imported guard** | `source = imported` invoices are never cleared or reported |
 
-**Credential checklist (MBA):** CSID onboarding per dealer + for Miqwad; PIH chain handling; simplified-vs-standard mapping.
+**Credential checklist (MBA):** CSID/PCSID onboarding per dealer **+ a separate platform EGS/CSID for Miqwad**; OTP for each Compliance CSID; PIH-chain seeding; Standard-vs-Simplified mapping; sandbox `-nonprod`/`-sim` access.
 
 ---
 
@@ -89,19 +104,29 @@ Adapters are built against **WireMock** until sandbox access lands, so developme
 
 ---
 
-## 5. Moyasar — payments 🟡 P-5
+## 5. Moyasar — payments ✅ contract in hand (vendor docs received 2026-06-30)
 
-**Purpose.** Process Mada / Visa / Mastercard / Apple Pay / STC Pay. Card data stays in the gateway's hosted fields/SDK and **never touches Miqwad servers** — Miqwad stores only gateway references (PCI minimization). Integrated via REST behind a provider-agnostic adapter — see [ADR-015](../decisions/adr-log.md#adr-015--payments-moyasar). **Moyasar is the only payment provider.**
+**Purpose.** Process Mada / Visa / Mastercard / Apple Pay / Samsung Pay / STC Pay. Card data stays in the gateway's hosted SDK and **never touches Miqwad servers** — Miqwad stores only gateway references (PCI minimization). Integrated via REST behind a provider-agnostic adapter — see [ADR-015](../decisions/adr-log.md#adr-015--payments-moyasar). **Moyasar is the only payment provider.** Base URL **`https://api.moyasar.com/v1`** (HTTPS only).
+
+> ### ✅ Decided: refundable deposit is **charged up front, refunded on clean return** — NOT an auth-hold
+>
+> The refundable deposit is taken as a **real payment** at booking and **refunded in full on a clean return** (kept, or partially refunded, on damage). It is **not** a card authorization-hold: auth windows are far too short for multi-day rentals, and Moyasar does not surface issuer auto-void. So Step 2 below uses **charge → refund**, not authorize → capture/void. (Manual auth/capture/void exist on the API — see the row — but we deliberately do not use them for deposits.)
 
 | | |
 |---|---|
-| **Operations** | `createPaymentIntent(amount, breakdown) → clientSecret` · `capture` · `authorizeHold(deposit)` · `void` · `refund(partial \| full)` · webhook `onEvent` |
-| **Credentials** | Moyasar API keys per environment (vault); publishable key shipped to the apps |
-| **Resilience** | Timeout ~20s (gateway round-trip excluded from the booking NFR); retries only on idempotent ops; breaker |
-| **Webhooks** | **Signature-verified and deduped by gateway event id** — processed once |
-| **Error codes** | `payment_required` / `payment_failed`; deposit-hold expiry policy (re-auth or capture-and-refund) defined up front |
+| **Auth model** | **HTTP Basic**, API key = username, **empty password**. **Publishable key** (`pk_…`) — client-side, **Create-Payment only**, used by the hosted SDK; **Secret key** (`sk_…`) — backend, all operations. **Test vs live by key prefix** |
+| **Operations** | `createPayment(amount, source, callback_url, given_id) → payment` (`POST /payments`) · `getPayment(id)` (`GET /payments/:id`) · `refund(id, amount?)` (full or **optional partial**) · *(manual flow, unused for deposits: `manual:true` → authorized; `capture(amount?)`; `void`)* · webhook `onEvent` |
+| **Amount** | **Halalas — 1:1 with our money invariant** ([ADR-005](../decisions/adr-log.md#adr-005--money-as-integer-halalas--append-only-ledger)); pass our stored integer **directly**, no conversion |
+| **Sources** | `source` ∈ {`creditcard`, `token`, `applepay`, `samsungpay`, `stcpay`}. **Mada is NOT a separate type** — it rides `creditcard` and is identified in the response by **`source.company = "mada"`**. `callback_url` is **required** for `creditcard`/`token` (3DS redirect) |
+| **Credentials** | Moyasar keys per environment in the vault; **publishable `pk_…`** shipped to the apps, **secret `sk_…`** backend-only — **never committed** (KMS/Vault only) |
+| **Idempotency (create)** | **`given_id`** (a UUIDv4 we generate → becomes the Moyasar payment id); **retry only on 5xx / network**, never on a 4xx |
+| **Hosted SDK** | `moyasar-payment-form` collects card data client-side with the **publishable** key and posts **directly to Moyasar** — PAN never touches Miqwad servers (PCI). The RN app uses it via WebView / mobile SDK |
+| **Webhooks** | **No HMAC header.** Verify via the **`secret_token` field in the body** (echoes the `shared_secret` set at registration — **constant-time compare**) + check **`live`** + **re-fetch `GET /payments/:id`** with the secret key. Moyasar retries **up to 6 times** → the handler must be **idempotent keyed on event `id`**. Events: `payment_paid` / `failed` / `authorized` / `captured` / `refunded` / `voided` |
+| **Resilience** | Timeout ~20s (gateway round-trip excluded from the booking NFR); retries only on idempotent ops; dedicated breaker |
+| **Commission reversal** | **Our ledger's job** — Moyasar refunds have no commission concept. On a refund of a `channel = marketplace` booking, **we emit the compensating commission-reversal ledger entry ourselves** (see [sagas-outbox-jobs.md](sagas-outbox-jobs.md)) |
+| **Error codes** | `payment_required` / `payment_failed` |
 
-**Credential checklist (MBA):** Moyasar merchant account (SAMA-supervised); sandbox keys; webhook endpoint + secret.
+**Credential checklist (MBA):** Moyasar merchant account (SAMA-supervised); test + live keys (`pk_…` / `sk_…`); webhook endpoint + `shared_secret`. **Test card `4111 1111 1111 1111`; pull Moyasar's official Mada + decline test cards before writing the payment test suite** (not in the provided files).
 
 ---
 
@@ -138,10 +163,10 @@ The government approval queues are on the **V1 critical path**. Adapters are bui
 | System | Needs | Owner | Status | STATUS |
 |---|---|---|---|---|
 | Tajeer / Naql | TGA license + Naql account (per dealer) | MBA | apply week 0 | P-1 |
-| ZATCA | CSID onboarding (per dealer + Miqwad) | MBA | apply week 0 | P-2 |
+| ZATCA | CSID/PCSID (per dealer) + **platform EGS/CSID** (Miqwad) | MBA | ✅ docs in hand; apply CSIDs week 0 | P-2 |
 | Wasl | TGA Wasl credentials + obligation confirmation | MBA | apply week 0 | P-3 |
 | Absher | access via the Tajeer flow | MBA | with Tajeer | P-4 |
-| Moyasar | merchant account + sandbox | MBA | apply week 0 | P-5 |
+| Moyasar | merchant account + keys (`pk_…`/`sk_…`) | MBA | ✅ docs in hand; provision account | P-5 |
 | Notifications | provider selection (e.g. Unifonic) | MBA | select | P-6 |
 | GCP / CNTXT | me-central2 access via CNTXT | MBA + Sr BE | prep | — |
 

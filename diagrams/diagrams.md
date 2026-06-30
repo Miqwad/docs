@@ -68,9 +68,9 @@ Includes `confirmation_failed` (payment ok / Tajeer fail) and channel notes. Gua
 ```mermaid
 stateDiagram-v2
   [*] --> pending: reserve (any channel)
-  pending --> confirmed: payment captured/authorized + Tajeer registered
+  pending --> confirmed: payment charged (rental+deposit) + Tajeer registered
   pending --> confirmation_failed: payment ok but Tajeer failed
-  confirmation_failed --> pending: auto-refund/void + retry
+  confirmation_failed --> pending: auto-refund + retry
   pending --> cancelled: customer/dealer cancels
   confirmed --> active: handover inspection (min photos)
   confirmed --> no_show: grace elapsed → fee
@@ -101,11 +101,11 @@ sequenceDiagram
   C->>APP: choose car + dates
   APP->>API: POST /customer/bookings (Idempotency-Key)
   API->>DB: booking=pending + availability_block + outbox(register_contract)
-  API-->>APP: payment_intent (rental+deposit hold)
+  API-->>APP: payment_intent (rental+deposit charged)
   APP->>PAY: pay (hosted fields)
   PAY-->>APP: payment_ref
   APP->>API: confirm-payment(payment_ref)
-  API->>DB: payment=authorized
+  API->>DB: payment=paid (captured)
   JR->>DB: read outbox(pending)
   JR->>TAJ: register contract
   alt Tajeer OK
@@ -113,7 +113,7 @@ sequenceDiagram
     JR->>DB: contract=registered, booking=confirmed, outbox=dispatched
     API-->>C: confirmed + pickup details
   else Tajeer fails
-    JR->>PAY: void/refund authorization
+    JR->>PAY: refund payment(s)
     JR->>DB: booking=confirmation_failed, release block, log reason
     API-->>C: payment reversed, please retry
   end
@@ -140,7 +140,7 @@ sequenceDiagram
   else timeout
     JR->>DB: invoice=pending_clearance (retry, car already released)
   end
-  JR->>PAY: refund or partial-capture deposit (per damage)
+  JR->>PAY: refund deposit (keep evidenced damage; per damage)
   JR->>DB: ledger entries (deposit, vat, commission)
   JR->>TAJ: close contract
   JR->>DB: booking=completed

@@ -89,7 +89,7 @@ For every framework and library in the stack: a plain-English **what**, **why we
 - **What:** Saudi payment gateway; we use its hosted fields/SDK so card data never touches our servers.
 - **Why:** Mada + KSA rails; clean REST API (ADR-015).
 - **Docs:** [docs.moyasar.com](https://docs.moyasar.com/)
-- **Key for Miqwad:** behind a provider-agnostic adapter; deposit lifecycle = authorize→capture/refund; **idempotency keys** on every money call; webhooks signature-verified + processed once.
+- **Key for Miqwad:** behind a provider-agnostic adapter; deposit = charged up front, refunded on return (partial on damage); **idempotency keys** on every money call; webhooks signature-verified + processed once.
 
 ### Tajeer / Wasl / Absher — government platforms
 - **What:** Tajeer = the unified e-rental contract; Wasl = fleet tracking reporting to TGA; Absher = renter identity/e-sign (in the Tajeer flow).
@@ -97,7 +97,7 @@ For every framework and library in the stack: a plain-English **what**, **why we
 - **Docs:** credential-gated government APIs with sparse public docs — learn from the official onboarding packs and our adapter specs. [TGA](https://tga.gov.sa)
 - **Key for Miqwad:** only the lessor operates the Tajeer contract (dealer's own Naql credentials, from the vault); **build against WireMock until sandbox access lands**; each behind a circuit breaker; **imported historical contracts are never re-registered**.
 
-> 🟡 The wire-level contracts for Tajeer/ZATCA/Wasl/Absher/Moyasar are **Provisional** pending vendor docs — see [../STATUS.md](../STATUS.md) (P-1…P-5).
+> 🟡 The wire-level contracts for Tajeer/Wasl/Absher are still **Provisional** pending vendor docs — see [../STATUS.md](../STATUS.md) (P-1, P-3, P-4). **ZATCA and Moyasar contracts are in hand (2026-06-30)** — those are firm.
 
 ---
 

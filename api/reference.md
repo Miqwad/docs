@@ -2,7 +2,7 @@
 
 The human companion to the machine-readable contract: three surfaces, the wire conventions, the full error catalog, and entitlement-gating semantics. The OpenAPI file [`./openapi.yaml`](./openapi.yaml) is the source of truth (importable into Swagger UI / Postman / Stoplight); this page explains it.
 
-> 🟡 **Integration-touching endpoints are Provisional.** Anything that calls Tajeer, ZATCA, Wasl, Absher, Moyasar, or SMS/email/push is built behind a stable interface, but the wire-level request/response detail will firm up once vendor docs land — see STATUS [P-1..P-6](../STATUS.md). The endpoint shapes below are stable; the integration DTOs behind them are not.
+> 🟡 **Some integration-touching endpoints are Provisional.** Anything that calls Tajeer, Wasl, Absher, or SMS/email/push is built behind a stable interface, but the wire-level request/response detail will firm up once vendor docs land — see STATUS [P-1, P-3, P-4, P-6](../STATUS.md). **ZATCA and Moyasar contracts are in hand (2026-06-30) — those DTOs are firm.** The endpoint shapes below are stable; the still-pending integration DTOs behind them are not.
 
 ---
 
@@ -73,7 +73,7 @@ Stack traces and internal messages are never leaked.
 | `payment_failed` | 402 | Gateway declined; `details.gateway_code` |
 | `tajeer_failed` 🟡 | 422 | Contract registration rejected; `details.reason` |
 | `tajeer_auth_failed` 🟡 | 422 | Dealer Naql credentials invalid / expired |
-| `zatca_failed` 🟡 | 422 | Invoice clearance / report rejected; `details.reason` |
+| `zatca_failed` | 422 | Invoice clearance / report rejected; `details.reason` |
 | `absher_failed` 🟡 | 422 | Identity / e-sign failed |
 | `identity_unverified` 🟡 | 422 | Renter KYC not verified |
 | `wasl_failed` 🟡 | 422 | Wasl reporting rejected (non-blocking to core flow) |
@@ -86,7 +86,7 @@ Stack traces and internal messages are never leaked.
 | `dependency_unavailable` 🟡 | 503 | External system circuit open; safe to retry later |
 | `internal_error` | 500 | Unexpected; quote `request_id` to support |
 
-🟡 = surfaced by integration-touching flows whose vendor contract is Provisional (STATUS [P-1..P-6](../STATUS.md)).
+🟡 = surfaced by integration-touching flows whose vendor contract is still Provisional (Tajeer/Wasl/Absher/notifications — STATUS [P-1, P-3, P-4, P-6](../STATUS.md)). ZATCA + Moyasar contracts are in hand (2026-06-30).
 
 ---
 
@@ -121,7 +121,7 @@ The consumer marketplace: phone-OTP auth, search across all dealerships, book, p
 | POST | `/customer/bookings/{id}/cancel` | Cancel |
 | POST | `/customer/bookings/{id}/review` | Rate dealer/vehicle after completion |
 
-**Booking creation is two-phase.** `POST /customer/bookings` reserves a *pending* booking and returns a Moyasar `payment_intent` covering rental + deposit hold; the app completes payment with the gateway SDK, then calls `confirm-payment`. If the window was taken in between, creation returns `409 vehicle_unavailable` — the live-inventory guarantee in action.
+**Booking creation is two-phase.** `POST /customer/bookings` reserves a *pending* booking and returns a Moyasar `payment_intent` covering rental + deposit, both **charged up front** (the deposit is refunded in full on a clean return — ADR-015); the app completes payment with the gateway SDK, then calls `confirm-payment`. If the window was taken in between, creation returns `409 vehicle_unavailable` — the live-inventory guarantee in action.
 
 ---
 
@@ -255,15 +255,15 @@ Commission accrues only on `channel = marketplace` bookings, never `dealer_direc
 
 ## Integration touchpoints 🟡 (server-side, not public endpoints)
 
-These run inside the platform, referenced by the flows above, behind provider-agnostic adapters with circuit breakers. Wire contracts are Provisional pending vendor docs (STATUS [P-1..P-6](../STATUS.md)).
+These run inside the platform, referenced by the flows above, behind provider-agnostic adapters with circuit breakers. ZATCA and Moyasar wire contracts are **in hand (2026-06-30)**; Tajeer/Wasl/Absher/notifications stay Provisional pending vendor docs (STATUS [P-1, P-3, P-4, P-6](../STATUS.md)).
 
 | Integration | Trigger / role | STATUS |
 |---|---|---|
 | **Tajeer** | On booking `confirm`, registers the unified e-contract via the dealership's Naql credentials; status tracked on `rental_contract`. | [P-1](../STATUS.md) |
-| **ZATCA Phase 2** | On `return` completion, generates the signed e-invoice (XML + TLV QR), clears/reports, stores the result on `invoice`. | [P-2](../STATUS.md) |
+| **ZATCA Phase 2** | On `return` completion, generates the signed e-invoice (XML + TLV QR), clears/reports, stores the result on `invoice`. | [✅ P-2](../STATUS.md) |
 | **Wasl** | Fleet-tracking registration + telemetry reporting; non-blocking to the core flow. | [P-3](../STATUS.md) |
 | **Absher** | Renter identity verification / e-sign. | [P-4](../STATUS.md) |
-| **Moyasar** | Payment intents, captures, deposit holds, refunds, voids; results land on `payment` via webhook. | [P-5](../STATUS.md) |
+| **Moyasar** | Payment intents, charges (rental + deposit up front), refunds; results land on `payment` via webhook. Deposit refunded on clean return (ADR-015). | [✅ P-5](../STATUS.md) |
 | **Email / SMS / push** | Notification delivery (provider TBD, e.g. Unifonic for KSA SMS). | [P-6](../STATUS.md) |
 
 ### Inbound webhooks

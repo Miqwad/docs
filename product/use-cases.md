@@ -14,7 +14,7 @@ Three actor groups: **Customer** (renter), **Dealer staff** (owner/manager/agent
 
 | Transition | Hard guard |
 |---|---|
-| `pending → confirmed` | **Payment captured/held** first |
+| `pending → confirmed` | **Payment charged up front** (rental + deposit) first |
 | `confirmed → active` | **Tajeer contract `registered`** first, **and** **handover inspection** complete (with mandatory geotagged + timestamped photos) |
 | `active → completed` | **Return inspection** done **and** **ZATCA invoice cleared** first |
 | → `cancelled` / `no_show` | Branch states; trigger compensation (release block, void/refund) |
@@ -60,7 +60,7 @@ All channels write the same `availability_block` (exclusion constraint), so ther
 1. Phone sign-in → `POST /customer/auth/request-otp` → `.../verify-otp`.
 2. City/location + dates → `GET /customer/search`. Results show **only vehicles free for the whole window**, all-in daily price + distance.
 3. Open a car → `GET /customer/listings/{id}?pickup_at&return_at` returns a **fully itemized quote** (rental + deposit + VAT + mileage). No hidden fees.
-4. "Book" → `POST /customer/bookings` creates a **pending** booking + a Moyasar `payment_intent` (rental + deposit hold).
+4. "Book" → `POST /customer/bookings` creates a **pending** booking + a Moyasar `payment_intent` (rental + deposit, both charged up front).
 5. Pay via Mada/Apple Pay, then `POST /customer/bookings/{id}/confirm-payment`.
 6. **Success:** booking `confirmed`. If the window was taken first, step 4 returns `409 vehicle_unavailable` and the app re-searches.
 
@@ -86,7 +86,7 @@ All channels write the same `availability_block` (exclusion constraint), so ther
 1. "Start return" → `POST /dealer/bookings/{id}/inspections` (`type=return`, final odometer, fuel).
 2. Return photos captured the same way; app diffs against handover.
 3. New damage → `POST /dealer/inspections/{id}/damages` (severity + estimate + photo). Extra-km computed from odometer delta.
-4. Platform generates the **ZATCA Phase 2 e-invoice** (signed XML + TLV QR), clears/reports it; deposit captured-against-damage or **refunded** (atomic, from platform escrow).
+4. Platform generates the **ZATCA Phase 2 e-invoice** (signed XML + TLV QR), clears/reports it; deposit **refunded** (kept against evidenced damage) — atomic, from platform escrow.
 5. `rental_contract` closed in Tajeer; booking → `completed`.
 6. **Success:** customer gets a compliant invoice + prompt deposit refund; dealer's books are ZATCA-compliant automatically.
 

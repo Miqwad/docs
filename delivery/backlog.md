@@ -88,7 +88,7 @@ Vertical slices; integrate continuously.
 |---|---|
 | **F1 Two-phase customer booking (reserve → pay → confirm)** *(SB/MB/SF)* | `409 vehicle_unavailable` on race; idempotent create |
 | **F2 Booking-confirm saga (payment + Tajeer + outbox)** *(SB)* | happy + payment-ok/Tajeer-fail (auto-refund) branches pass e2e |
-| **F3 Moyasar payment integration** *(SB + SF)* — hosted fields, deposit hold | card data never hits our servers; webhook idempotent |
+| **F3 Moyasar payment integration** *(SB + SF)* — hosted fields, deposit charge (up front) | card data never hits our servers; webhook idempotent |
 | **F4 External/walk-in/dealer-direct booking entry** *(MB/SF)* | external_aggregator blocks availability, runs compliance, **no commission** |
 | **F5 Booking management (view/cancel/extend)** *(MB/SF)* | extend re-checks availability + recomputes price |
 
@@ -98,7 +98,7 @@ Vertical slices; integrate continuously.
 |---|---|
 | **G1 Inspections + geotagged/timestamped/hashed photos + damage** *(MB/SF)* | booking can't go `active` without min handover photos |
 | **G2 ZATCA invoicing (official SDK) + clearance** *(SB)* | signed XML + QR; `pending_clearance` retry doesn't strand the car |
-| **G3 Return-settle saga + deposit capture/refund + ledger** *(SB)* | clean return refunds promptly; damaged → partial capture up to evidence; ledger append-only |
+| **G3 Return-settle saga + deposit refund + ledger** *(SB)* | clean return refunds promptly; damaged → keep evidenced-damage amount, refund the rest; ledger append-only |
 | **G4 Customer booking detail (photos/contract/invoice/refund)** *(SF/UX)* | customer sees compliant invoice + refund status |
 
 ## EPIC H — Maintenance & telemetry · *S5, MB + SB + SF/UX*

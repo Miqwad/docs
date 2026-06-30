@@ -30,13 +30,13 @@ These protect the invariants. They are CI gates.
 |---|---|---|
 | 1 | **Cross-tenant leak** — *the single most important test* | Set tenant A's GUC, query tenant B's rows via the repository **and** a raw native query → **zero rows** (proves `@TenantId` + RLS) |
 | 2 | **No double-booking race** | Two concurrent confirms for overlapping windows on the last car → **exactly one succeeds**, the other gets `vehicle_unavailable` (proves the `tstzrange` + GiST exclusion constraint, not just app logic) |
-| 3 | **Booking-confirm saga — happy + failure branches** | pay→confirm→Tajeer-OK; and **payment-OK / Tajeer-fail → auto-void/refund**, block released, `confirmation_failed` (money never kept); Tajeer-down → hold-only → window expiry → refund |
+| 3 | **Booking-confirm saga — happy + failure branches** | pay→confirm→Tajeer-OK; and **payment-OK / Tajeer-fail → auto-refund**, block released, `confirmation_failed` (money never kept); Tajeer-down → charge + queue → window expiry → refund |
 | 4 | **Return-settle saga** | return→ZATCA-clear→deposit settle→Tajeer-close; ZATCA-timeout → `pending_clearance` but **car released**; refund-fail → `settlement_pending` + escalation |
 | 5 | **Idempotency replay** | Replay every money/external POST (same key) and every webhook (same event id) → **single effect** (no double-charge / register / refund) |
 | 6 | **Imported-document guard** | Import a historical contract + invoice (`source=imported`), run all sagas + reconciliation → **zero** Tajeer/ZATCA external calls for them |
 | 7 | **Entitlement gating** | Management-only dealer hits a marketplace endpoint → `403 entitlement_package_excluded`; Marketplace-only hits full-ops → `403`; create over tier limit → `402 entitlement_limit_reached` |
 | 8 | **Channel commission** | `marketplace` booking accrues commission; `dealer_direct`/`walk_in`/`external_aggregator` accrue **zero**; refund reverses commission proportionally |
-| 9 | **Money correctness** | Deposit authorize→partial-capture→release; VAT 15%; commission; all integer halalas; ledger is **append-only** (no UPDATE/DELETE path) |
+| 9 | **Money correctness** | Deposit charge→partial-refund (keep evidenced damage)→full refund; VAT 15%; commission; all integer halalas; ledger is **append-only** (no UPDATE/DELETE path) |
 | 10 | **Import dry-run** | Load a real dealer's export into staging → bad rows quarantined (batch not failed) → committed idempotently (re-commit doesn't duplicate) |
 
 ---

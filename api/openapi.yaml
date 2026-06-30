@@ -1,8 +1,9 @@
 # ============================================================================
-# PROVISIONAL — integration-facing contracts (Tajeer, ZATCA, Wasl, Absher,
-# Moyasar payments, notifications) are refined on receipt of official vendor
-# documentation + credential onboarding. See docs/STATUS.md (P-1..P-6).
-# Payments: Moyasar only. Integration-touching schemas note this inline.
+# ZATCA + Moyasar contracts received 2026-06-30 (in hand) — their schemas are
+# firm. Tajeer, Wasl, Absher, and notifications remain PROVISIONAL: refined on
+# receipt of official vendor documentation + credential onboarding. See
+# docs/STATUS.md (P-1, P-3, P-4, P-6 still pending; P-2/P-5 resolved).
+# Payments: Moyasar only. Still-provisional integration schemas note it inline.
 # Snapshot dated 2026-06-30.
 # ============================================================================
 openapi: 3.1.0
@@ -202,7 +203,7 @@ paths:
     post:
       tags: [Customer Bookings]
       summary: Create a booking (quote -> reserve)
-      description: Creates a pending booking and returns a payment intent for the rental + refundable deposit hold.
+      description: Creates a pending booking and returns a payment intent for the rental + refundable deposit (both charged up front; deposit refunded on clean return — ADR-015).
       requestBody:
         required: true
         content:
@@ -1059,7 +1060,7 @@ components:
     PaymentIntent:
       type: object
       properties:
-        provider: { type: string, enum: [moyasar] }  # provisional: payment contract pending Moyasar API docs (STATUS P-5)
+        provider: { type: string, enum: [moyasar] }  # Moyasar — contract in hand (2026-06-30); deposit charged up front, refunded on return (ADR-015)
         client_secret: { type: string }
         amount: { type: integer }
         currency: { type: string, example: "SAR" }
@@ -1140,10 +1141,10 @@ components:
       type: object
       properties:
         id: { type: string }
-        type: { type: string, enum: [rental, deposit_hold, deposit_capture, deposit_refund, extra_charge, fine] }
+        type: { type: string, enum: [rental, deposit_hold, deposit_capture, deposit_refund, extra_charge, fine] }  # deposit_hold = the captured deposit charge (not a card auth-hold), per ADR-015; ledger categories, model-agnostic
         amount: { type: integer }
         method: { type: string, enum: [mada, visa, mastercard, apple_pay, stc_pay] }
-        provider: { type: string, enum: [moyasar] }  # provisional: payment contract pending Moyasar API docs (STATUS P-5)
+        provider: { type: string, enum: [moyasar] }  # Moyasar — contract in hand (2026-06-30); deposit charged up front, refunded on return (ADR-015)
         status: { type: string, enum: [initiated, authorized, captured, failed, refunded] }
 
     Invoice:

@@ -77,10 +77,10 @@ Dealer Tajeer/Naql credentials and ZATCA CSIDs are the crown jewel.
 Payments run through **Moyasar** ([ADR-015](../decisions/adr-log.md#adr-015--payments-moyasar)).
 
 - Card data uses the gateway's **hosted fields/SDK** — **card PAN never touches Miqwad servers**, keeping PCI scope to **SAQ-A**.
-- Miqwad stores **only gateway references/tokens**. Deposit lifecycle = authorize → capture/refund, all idempotent (**idempotency key on every money call**).
+- Miqwad stores **only gateway references/tokens**. Deposit = charge up front → refund (partial on damage), all idempotent (**idempotency key on every money call**).
 - **Webhooks are signature-verified, replay-protected, and processed once** (idempotent by event id). An unverifiable webhook is rejected and alerted.
 
-> 🟡 Webhook / refund / void / deposit-hold contract detail is provisional pending Moyasar API docs ([STATUS P-5](../STATUS.md)).
+> ✅ Moyasar contract in hand (2026-06-30): webhook / charge / refund detail is firm ([STATUS P-5](../STATUS.md)). Deposit is charged up front and refunded on return (ADR-015).
 
 ---
 

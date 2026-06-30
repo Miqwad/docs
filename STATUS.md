@@ -19,18 +19,18 @@ _Last updated: 2026-06-30._
 
 ## 🟡 Provisional — pending **vendor API documentation**
 
-We do not yet hold the official integration docs/credentials for the external systems. The **adapter approach is decided** (provider-agnostic ports behind circuit breakers); the **wire-level contracts are not**. Build the ports; refine the DTOs when the vendor docs + credential onboarding land. Government-credential applications are on the real-world critical path — start them now.
+**ZATCA (P-2) and Moyasar (P-5) vendor docs were received 2026-06-30 and are now ✅ resolved** (rows below); **Tajeer (P-1), Wasl (P-3), Absher (P-4), and notifications (P-6) remain pending.** The **adapter approach is decided** (provider-agnostic ports behind circuit breakers); refine the still-pending DTOs when their vendor docs + credential onboarding land. Government-credential applications are on the real-world critical path — start them now.
 
 | # | Integration | What's provisional | Unblocked by |
 |---|---|---|---|
 | P-1 | **Tajeer** (e-contract) | Request/response fields, contract lifecycle states, error codes | Tajeer onboarding + API docs |
-| P-2 | **ZATCA** Phase 2 (e-invoice) | Exact XML/UBL profile fields, clearance/reporting responses, sandbox specifics | Official ZATCA SDK + portal onboarding |
+| **P-2 ✅** | **ZATCA** Phase 2 (e-invoice) | ✅ **Resolved 2026-06-30** — SDK R4.0.0 + standards received; decided to **embed R4.0.0 in-process on JDK 25**; clearance (B2B std) / reporting (B2C simplified) via Fatoora v2; per-EGS CSID + a Miqwad platform EGS ([integrations.md](architecture/integrations.md), ADR-014) | Done — onboard **GA R4.x** + JDK-25 sign smoke test (**F-6**) |
 | P-3 | **Wasl** (fleet tracking) | Telemetry ingest contract, registration payloads | Wasl onboarding + API docs |
 | P-4 | **Absher** (identity / e-sign) | Identity verification flow + callbacks | Absher/Tajeer onboarding |
-| P-5 | **Moyasar** (payments) | Webhook payloads, refund/void/capture response shapes, deposit-hold semantics | Moyasar account + API docs |
+| **P-5 ✅** | **Moyasar** (payments) | ✅ **Resolved 2026-06-30** — API ref + Postman received; halalas 1:1, Mada via `creditcard`, hosted SDK (PCI-safe), webhooks via `secret_token` + re-fetch (idempotent per event id). **Deposit = charge up front, refund on return** (auth-holds too short); commission reversal is our ledger's job ([integrations.md](architecture/integrations.md), ADR-015) | Done — pull Moyasar Mada/decline test cards |
 | P-6 | **Email / SMS / push** | Provider selection (e.g. Unifonic for SMS in KSA) + send/delivery contracts | Provider selection |
 
-These are flagged with a 🟡 banner in [architecture/integrations.md](architecture/integrations.md) and with `#`/`description` notes in [api/openapi.yaml](api/openapi.yaml).
+The still-pending ones (P-1/P-3/P-4/P-6) carry a 🟡 banner in [architecture/integrations.md](architecture/integrations.md); **P-2 and P-5 are now ✅ in hand** there with the real contracts.
 
 ---
 
@@ -58,6 +58,7 @@ Business-flow detail that the current specs *assume* and that two dealer intervi
 | F-3 | **Boot-4 readiness: Togglz** | Confirm Boot-4-compatible release; else fall back to an own flag table behind the same interface | [decisions/follow-ups.md](decisions/follow-ups.md) |
 | F-4 | **Boot-4 readiness: JobRunr starter** | ✅ Resolved 2026-06-30 — `jobrunr-spring-boot-4-starter` 8.7.0 ships (Boot 4 + Jackson 3 since 8.3.0) | [decisions/follow-ups.md](decisions/follow-ups.md) |
 | F-5 | **Dependency BOM re-verification** | The version matrix in [engineering/stack.md](engineering/stack.md) is a 2026-06-30 snapshot — re-run version + CVE checks at scaffold time | [engineering/stack.md](engineering/stack.md) |
+| F-6 | **ZATCA SDK on JDK 25** | Smoke-test a real invoice **sign on JDK 25** with the GA **R4.x** SDK at scaffold; fallback = pin only the ZATCA path to a Java-21 toolchain if it fails | [architecture/integrations.md](architecture/integrations.md), [decisions/adr-log.md](decisions/adr-log.md) (ADR-014) |
 
 ---
 

@@ -18,7 +18,7 @@ The two money-and-government sagas (booking-confirm, return-settle), the transac
 - **Saga state** lives on the aggregate (`booking.status` + `rental_contract.status` + `invoice.clearance_status` + `payment.status`), with a lightweight `booking_saga_state` when a step sequence needs explicit tracking. Transitions are guarded.
 - **Why not synchronous orchestration:** with money + government contracts in the loop, durable, inspectable, retryable state beats in-memory calls that vanish on a crash.
 
-JobRunr is also the single job engine for reconciliation, telemetry processing, partition maintenance, notifications, payout/commission aggregation, deposit-hold expiry, and import batches.
+JobRunr is also the single job engine for reconciliation, telemetry processing, partition maintenance, notifications, payout/commission aggregation, deposit refund/settlement, and import batches.
 
 ---
 
@@ -39,11 +39,11 @@ JobRunr is also the single job engine for reconciliation, telemetry processing, 
 | Step | Action | On failure → compensation |
 |---|---|---|
 | 1 | Reserve: `booking = pending` + write `availability_block` (exclusion constraint) | Window taken → `409 vehicle_unavailable`; nothing else created |
-| 2 | Payment: authorize rental + **deposit hold** (Moyasar) | Auth fails → stays `pending`, **release block**, tell customer; no contract attempted |
+| 2 | Payment: **charge rental + the refundable deposit up front** (Moyasar `POST /payments`, both as real payments — the deposit is **charged, not held**) | Payment fails → stays `pending`, **release block**, tell customer; no contract attempted |
 | 3 | Outbox `register_contract` dispatched by JobRunr → Tajeer register | — |
-| 4a | Tajeer OK → `contract = registered`, `booking = confirmed`, ledger holds recorded | — |
-| 4b | Tajeer **fails** (e.g. expired operating card) | `booking = confirmation_failed`; **auto-void/refund** the authorization within the window; release block; notify customer + dealer with the Tajeer reason; dealer fixes and retries. **Money is never kept.** |
-| 4c | Tajeer **down** (circuit open) | `booking = pending_contract`; payment **authorized but not captured** (hold only); retry queue; if unresolved within the hold window → void + refund + ask to retry; dealer sees a "Tajeer unavailable" banner |
+| 4a | Tajeer OK → `contract = registered`, `booking = confirmed`, ledger entries recorded (rental + deposit) | — |
+| 4b | Tajeer **fails** (e.g. expired operating card) | `booking = confirmation_failed`; **auto-refund** the rental **and** the deposit charge; release block; notify customer + dealer with the Tajeer reason; dealer fixes and retries. **Money is never kept.** |
+| 4c | Tajeer **down** (circuit open) | `booking = pending_contract`; retry queue; if unresolved within the policy window → **refund** rental + deposit + ask to retry; dealer sees a "Tajeer unavailable" banner |
 | 5 | Edge: Tajeer registered but local confirm write lost | Reconciliation detects the orphan `tajeer_contract_ref` and either completes the local booking or closes the Tajeer contract — **no double registration** |
 
 Commission is computed at confirm **only if `channel = marketplace`**.
@@ -57,9 +57,9 @@ Commission is computed at confirm **only if `channel = marketplace`**.
 | Step | Action | On failure → behaviour |
 |---|---|---|
 | 1 | Return inspection (photos, odometer, fuel, damages); `vehicle = available` **immediately** | A ZATCA/Tajeer delay must **not** strand the car — release regardless |
-| 2 | Outbox `clear_invoice` → ZATCA clear/report | Fails/times out → invoice `pending_clearance` queue, retried; customer gets the compliant invoice once cleared |
-| 3 | Deposit settle: clean → **release/refund** in full promptly; damaged → **partial capture** up to evidenced damage, remainder released | Refund fails → `settlement_pending`, auto-retry, then a manual finance task + alert (**never silently dropped**) |
-| 4 | Ledger entries: deposit, VAT, commission; commission **reversed** proportionally on any refund | — |
+| 2 | Outbox `clear_invoice` → ZATCA clear/report (**in-process SDK signs + validates offline, then Fatoora v2 clears/reports** — see [integrations.md §2](integrations.md)) | Fails/times out → invoice `pending_clearance` queue, retried; customer gets the compliant invoice once cleared |
+| 3 | Deposit settle (the deposit was **charged up front** at booking): clean → **refund in full** promptly; damaged → **refund the remainder** (keep / partially refund the evidenced-damage amount) | Refund fails → `settlement_pending`, auto-retry, then a manual finance task + alert (**never silently dropped**) |
+| 4 | Ledger entries: deposit refund, VAT, commission; commission **reversed** proportionally on any refund (**Miqwad's ledger emits the reversal — Moyasar has no commission concept**) | — |
 | 5 | Outbox `close_contract` → Tajeer close | Fails → retry queue; the operational return is not blocked; close-reconciliation ensures eventual closure |
 | 6 | `booking = completed` | Guard: requires return inspection + invoice `cleared` / `reported` |
 

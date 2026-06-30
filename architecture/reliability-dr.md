@@ -41,7 +41,7 @@ If notifications / analytics / telemetry or other **non-critical** deps are down
 
 | Dependency down | Fallback |
 |---|---|
-| **Tajeer** | Authorize-hold-only + queue the registration; the booking waits in a safe state, money not captured against a non-existent contract. |
+| **Tajeer** | Charge + queue the registration; the booking waits in a safe state. Auto-refund if registration never completes — money is returned, never kept against a non-existent contract. |
 | **Elide** not Boot-4-ready / lagging | Spring Data REST or plain controllers (the core never depends on Elide — see F-2). |
 | **Togglz** lagging | Own boolean flag table behind the same interface (F-3). |
 
@@ -121,6 +121,6 @@ PDPL requires personal data to stay **in-Kingdom**, but classic DR wants a **sec
 ## 9. Business continuity (beyond the database) ✅
 
 - **Data export / portability:** dealers can export their data (fleet, bookings, contracts, invoices, customers) — both a PDPL/contractual right and a continuity hedge if Miqwad itself is unavailable; the inverse of the import module.
-- **Government-integration continuity:** if a gov platform is down for an extended period, bookings continue in a safe held state with queued registration (§2 fallback); dealers are notified; no money is captured against unregistered contracts.
+- **Government-integration continuity:** if a gov platform is down for an extended period, bookings continue in a safe state with queued registration (§2 fallback); dealers are notified; money charged up front is auto-refunded if a contract never registers — never kept against an unregistered contract.
 - **People continuity:** no single person is the only one who can recover the system — the runbook, IaC, and credential-recovery procedure are documented and at least two team members can execute them.
 - **Vendor continuity:** the provider-agnostic payment adapter and the provider-agnostic integration adapters mean a single vendor outage is degraded service, not an outage.

@@ -34,7 +34,7 @@ A distinct sub-type, the **rental broker / agent (وسيط تأجير)**, arrang
 
 ### Customer lifecycle
 
-Discover (live availability + all-in price) → Select & quote (itemized) → Verify & book (phone OTP + Absher) → Pay (rental + deposit hold) → Sign (Tajeer e-contract via Absher) → Receive (pickup/delivery, review handover photos) → Use (drive, extend, manage in-app) → Return (return inspection diffed against handover; deposit captured-against-damage or refunded; ZATCA invoice; Tajeer close) → Reflect (rate, rebook).
+Discover (live availability + all-in price) → Select & quote (itemized) → Verify & book (phone OTP + Absher) → Pay (rental + deposit, both charged up front) → Sign (Tajeer e-contract via Absher) → Receive (pickup/delivery, review handover photos) → Use (drive, extend, manage in-app) → Return (return inspection diffed against handover; deposit refunded, kept against evidenced damage; ZATCA invoice; Tajeer close) → Reflect (rate, rebook).
 
 ### The booking state machine
 
@@ -108,7 +108,7 @@ Legally mandatory or operationally non-negotiable. Without all of them, a Saudi 
 
 ### Payments & deposits
 - **Moyasar** gateway: Mada, Visa/Mastercard, Apple Pay, STC Pay. Card data never touches Miqwad servers.
-- **Refundable deposit**: authorize/hold at booking, capture-against-damage or refund at return. Refund handling.
+- **Refundable deposit**: charged up front at booking, refunded in full on a clean return (kept against evidenced damage). Refund handling.
 - Money is always shown **itemized** (rental + refundable deposit + VAT).
 
 ### Maintenance, tracking & finance

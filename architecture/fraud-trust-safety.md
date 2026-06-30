@@ -12,10 +12,10 @@ Covers the *economic and behavioural* abuse that complements the technical attac
 
 | Threat | What it looks like | Controls (V1 unless noted) |
 |---|---|---|
-| **Payment fraud** | Stolen-card bookings, chargeback abuse | Gateway-hosted fields (no PAN on our servers), 3-D Secure / Mada rails, idempotent capture, velocity checks per customer/card-token, hold→capture lifecycle, refund only to original method |
-| **Deposit fraud** | Disputing legitimate deposit captures; "no damage" disputes | Geotagged + timestamped + hashed handover/return photos; itemized deposit ledger; damage evidence trail; clear pre-authorized deposit terms |
+| **Payment fraud** | Stolen-card bookings, chargeback abuse | Gateway-hosted fields (no PAN on our servers), 3-D Secure / Mada rails, idempotent charge, velocity checks per customer/card-token, charge-up-front → refund lifecycle, refund only to original method |
+| **Deposit fraud** | Disputing legitimate deposit charges; "no damage" disputes | Geotagged + timestamped + hashed handover/return photos; itemized deposit ledger; damage evidence trail; clear up-front deposit + refund terms |
 | **Account takeover (ATO)** | Credential stuffing, OTP interception | OTP rate/attempt caps + lockout; MFA for privileged dealer/admin roles; refresh-token reuse detection (revoke family); login-anomaly alerts (new device/geo); sensitive-action re-auth |
-| **Fake / no-show bookings** | Bogus marketplace bookings to block competitors' cars or farm something | No-show policy + penalty; customer reliability signals; deposit/auth required before `confirmed`; pattern detection on cancel/no-show rates |
+| **Fake / no-show bookings** | Bogus marketplace bookings to block competitors' cars or farm something | No-show policy + penalty; customer reliability signals; payment (rental + deposit) charged before `confirmed`; pattern detection on cancel/no-show rates |
 | **Review manipulation** | Cashback-for-reviews, fake/bulk reviews, competitor smears | **Verified-booking-only reviews** (must map to a completed rental); one review per booking; rate-limit + anomaly detection on review velocity; moderation queue; no incentivized reviews by policy |
 | **Inventory scraping** | Bots harvesting dealer fleet/pricing | Rate limits + Cloud Armor; bot detection; auth-gated detail where appropriate; anomaly alerts on read-volume spikes |
 | **Multi-tenant abuse** | A dealer probing for another dealer's data | `@TenantId` + RLS ([security.md §4](security.md#4-multi-tenant-isolation--the-worst-case-bug)) — a security control that is also an anti-abuse control |
@@ -56,7 +56,7 @@ Covers the *economic and behavioural* abuse that complements the technical attac
 Booking request
   → Customer blocklist?        — blocked → reject + audit
   → Velocity / risk checks     — risky   → hold for review
-  → Require deposit/payment auth
+  → Charge payment (rental + deposit) up front
   → Allow confirm
        ↑ no-show / dispute signals feed reliability signals → back into risk checks
 ```

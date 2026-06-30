@@ -113,22 +113,22 @@ Each record states a decision and the reasoning behind it, so the next engineer 
 ---
 
 ## ADR-014 — ZATCA Phase 2: wrap the official SDK
-**Status:** Accepted · 2026-06-30 · *(contract detail provisional → [STATUS](../STATUS.md) P-2)*
+**Status:** Accepted · 2026-06-30 · *(SDK + standards received 2026-06-30; runtime decided below)*
 
 **Context.** No turnkey JVM library exists (community libs cover Phase-1 QR only); ZATCA ships an official offline signing/validation SDK + CLI.
 
-**Decision.** **Wrap the official ZATCA SDK** (a Java library, called from Kotlin via JVM interop) behind the integration adapter; use BouncyCastle/ZXing/JAXB at the edges only. The ZATCA module issues **both** dealer→customer invoices **and** Miqwad→dealer (subscription + commission) B2B e-invoices.
+**Decision.** Wrap the **official ZATCA SDK R4.0.0**, embedded **in-process** in the JDK 25 monolith — R4.0.0 is built for Java 21 on a modern stack (Santuario 4.0.2) and was verified to load and run on Java 21, so it runs on JDK 25 by backward-compatibility (this removes the Java-version wall the older R3.4.8 hit — no sidecar, no reimplementation). The adapter does the **offline half via the SDK** (CSR, XAdES secp256k1/SHA-256 sign, TLV QR, hash, PIH-chain, local XSD + EN16931 + ZATCA-Schematron validation), then calls the **Fatoora API v2** (`accept-version: v2`; HTTP Basic = PCSID:secret) to **Clear** (Standard/B2B, synchronous) or **Report** (Simplified/B2C, async ≤24h). Each dealer EGS has its own CSR→CCSID→PCSID; **Miqwad runs its own platform EGS + CSID** for platform→dealer (commission/SaaS) B2B invoices. Onboard against the **GA R4.x**; a scaffold-time **JDK-25 sign smoke test** (F-6) is the acceptance gate.
 
 **Consequences.** We do not reimplement cryptographic stamping; platform self-billing is ZATCA-compliant from day one. Exact field/profile detail is provisional pending the official SDK + portal onboarding (STATUS P-2).
 
 ---
 
 ## ADR-015 — Payments: Moyasar
-**Status:** Accepted · 2026-06-30 · *(contract detail provisional → [STATUS](../STATUS.md) P-5)*
+**Status:** Accepted · 2026-06-30 · *(Moyasar API docs received 2026-06-30; deposit model decided)*
 
-**Decision.** Payments are processed through **Moyasar** (Mada, cards, Apple Pay, STC Pay), integrated via REST (Spring Framework 7 `RestClient`) behind a **provider-agnostic adapter**. Card data stays in the gateway's hosted fields/SDK — Miqwad stores only gateway references, minimizing PCI scope.
+**Decision.** Payments via **Moyasar** (Mada — which rides the `creditcard` rail, identified by `source.company`; plus cards, Apple Pay, STC Pay) over REST (`api.moyasar.com/v1`, HTTP Basic with the secret key) behind a provider-agnostic adapter. Card data is collected by Moyasar's **hosted SDK** (publishable key, posts directly to Moyasar) and never touches Miqwad servers. Amounts are **halalas, 1:1** with our money model; `given_id` gives idempotent payment creation; webhooks are verified by the `secret_token` body value + a re-fetch and processed idempotently per event id. **The refundable deposit is charged up front and refunded on clean return** (kept/partially-refunded on damage) — not an authorization hold, because card auth windows are too short for multi-day rentals and Moyasar does not surface issuer auto-void. **Commission reversal on refund is Miqwad's ledger responsibility** (Moyasar has no commission concept).
 
-**Consequences.** No card data touches Miqwad servers; a future second provider would be an adapter change, not a re-architecture. Webhook / refund / void / deposit-hold contract detail is provisional pending Moyasar API docs (STATUS P-5).
+**Consequences.** No card data touches Miqwad servers; a future second provider is an adapter change. The charge-up-front deposit ties up the customer's funds for the rental but is reliable across long rentals; pull Moyasar's official Mada/decline test cards before the payment test suite.
 
 ---
 
