@@ -1,6 +1,6 @@
 # Miqwad — Frontend Architecture & Design System
 
-How the three frontends are built and how they share one design system, so a senior frontend + a UI/UX design-engineer can deliver the customer app, dealer portal, and admin portal. Brand tokens come from [brand.md](brand.md).
+How the three frontends are built and how they share one design system, so a single frontend engineer — working as a design-engineer — can deliver the customer app, dealer portal, and admin portal. Brand tokens come from [brand.md](brand.md).
 
 > **Status:** The customer app stack (React Native + Expo) and the shared design system are **✅ Decided**. The **web-portal framework (dealer + admin) is 🔵 Open** — see [§web-portal framework](#web-portal-framework--open) below, [../STATUS.md](../STATUS.md) **O-1**, and [../decisions/adr-log.md](../decisions/adr-log.md) **ADR-022**.
 
@@ -37,7 +37,7 @@ The dealer and admin **web** portals run on a framework **not yet chosen between
 
 ## Shared design system — ✅ Decided (the multiplier)
 
-One component library across all surfaces is what lets ~2 effective builders cover three apps. The UI/UX person works as a **design-engineer**, building these as production components used by every surface.
+One component library across all surfaces is what lets a single frontend engineer cover three apps. The FE engineer works as a **design-engineer**, building these as production components in the shared `@miqwad/design-system`, used by every surface.
 
 - **Tokens** — **Style Dictionary**, generated from [brand.md](brand.md) → CSS variables (web) + a JS theme (RN): Pine `#0F3D33`, Deep Ink, Brass `#C8A24C`, Sand Gold, Paper `#F6F2E9`, Bone; status Go/Stop/Warn; type scale; spacing; radii; durations.
 - **Fonts** — IBM Plex Sans Arabic (UI/body), Sora (Latin display + tabular numerals for prices/odometer).
