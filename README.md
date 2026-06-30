@@ -92,4 +92,3 @@ docs/
 - **Tenancy:** every tenant-owned row carries `dealership_id`, always from the JWT claim — never request input.
 - Documentation is **Arabic-first product, English-first engineering docs**; UI is full RTL.
 
-> The original design package (the numbered `1 - …` … `8 - …` folders and `6 - Editable Sources/`) is retained as a **historical snapshot** and is no longer the source of truth for engineering. Anything intentionally not carried here (the stack bake-off, market research, the validation kit) still lives there.
