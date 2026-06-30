@@ -8,12 +8,12 @@
 - Initiate **Tajeer / ZATCA CSID / Wasl / Moyasar** applications (longest lead time — start first).
 - **GCP / CNTXT procurement (O8)** with the Senior BE.
 - **Path A** legal: PPA + Founders' Agreement with the equity-conversion option (see the confidential legal docs).
-- **Author the pricing/packaging matrix (doc 22)** + limits + commission (with Mid BE).
-- Recruit 2–3 pilot dealers; collect + map their historical data (doc 23).
+- **Author the [pricing/packaging matrix](../../product/pricing-packaging.md)** + limits + commission (with Mid BE).
+- Recruit 2–3 pilot dealers; collect + map their historical data ([data-migration](../../engineering/data-migration.md)).
 
 ## Weeks
 - **W1–2:** credentials → "sandbox granted"; finalize package / per-mode terms (incl. `marketplace_compliance`). → **M1**.
-- **W3–4:** production credential pathway; pilot import data sets; PDPL data-subject workflow (doc 27 §9).
+- **W3–4:** production credential pathway; pilot import data sets; PDPL data-subject workflow ([security.md](../../architecture/security.md)).
 - **W5–6:** M2 demo with a pilot dealer; commission/SaaS terms; sprint board + risk log (acting PM). → **M2**.
 - **W7–8:** dealer UAT scripts; ZATCA/Tajeer verification; **real historical-migration dry-run**.
 - **W9–10:** settlement/billing terms + reconciliation; Wasl confirmation with the TGA. → **M3**.
@@ -23,6 +23,6 @@
 ## Open items owned here
 - **O5:** tier prices/limits — propose, get investor sign-off.
 - **O8:** CNTXT/GCP procurement (with Senior BE).
-- **O10:** residency-vs-DR — confirm in-KSA DR options (with Senior BE, doc 30).
+- **O10:** residency-vs-DR — confirm in-KSA DR options (with Senior BE, [reliability-dr.md](../../architecture/reliability-dr.md)).
 
-*Pairs with: every role on requirements/UAT; Mid BE on packaging + migration; Senior BE on credentials + cloud procurement. Detail in docs 22/23/27/30 and the confidential legal docs.*
+*Pairs with: every role on requirements/UAT; Mid BE on packaging + migration; Senior BE on credentials + cloud procurement. Detail in [pricing-packaging](../../product/pricing-packaging.md) · [data-migration](../../engineering/data-migration.md) · [security](../../architecture/security.md) · [reliability-dr](../../architecture/reliability-dr.md) and the confidential legal docs.*
