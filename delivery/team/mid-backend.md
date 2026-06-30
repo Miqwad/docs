@@ -5,7 +5,7 @@
 **Weeks map to sprints:** W1–2 = S1 (M1) · W3–4 = S2 · W5–6 = S3 (**M2**) · W7–8 = S4 · W9–10 = S5 (**M3**) · W11–12 = S6 (**M4**).
 
 ## Prep
-- Lead-author docs **12 (low-level design) / 13 (physical schema) / 14 (backlog) / 15 (sagas) / 22 (packaging, with MBA) / 23 (migration) / 26 (diagrams)**.
+- Lead-author the domain specs: [architecture overview / low-level design](../../architecture/README.md), [data-model (physical schema)](../../architecture/data-model.md), [backlog](../../delivery/backlog.md), [sagas-outbox-jobs](../../architecture/sagas-outbox-jobs.md), [pricing-packaging](../../product/pricing-packaging.md) (with MBA), [data-migration](../../engineering/data-migration.md), [diagrams](../../diagrams/diagrams.md).
 - Repo conventions: module layout, DTO/mapping reference (Kotlin extension functions / Konvert), the **export pipeline (O2)**.
 - Co-design tenancy + entitlement with the Senior BE.
 
@@ -23,4 +23,4 @@
 - **W11:** **import/migration (full historical)** + export pipeline + reports/exports.
 - **W12:** reviews + Saher + branch perms + consolidated reporting + admin KPIs; coverage to target. → **M4**.
 
-*Pairs with: Senior BE (tenancy, money, return-settle saga, billing ledger), Frontend (booking/confirm/marketplace APIs), MBA (packaging, migration data, UAT). Detail in docs 12/13/14/15/16/22/23.*
+*Pairs with: Senior BE (tenancy, money, return-settle saga, billing ledger), Frontend (booking/confirm/marketplace APIs), MBA (packaging, migration data, UAT). Detail in [architecture/README](../../architecture/README.md) · [data-model](../../architecture/data-model.md) · [backlog](../../delivery/backlog.md) · [sagas-outbox-jobs](../../architecture/sagas-outbox-jobs.md) · [integrations](../../architecture/integrations.md) · [pricing-packaging](../../product/pricing-packaging.md) · [data-migration](../../engineering/data-migration.md).*
