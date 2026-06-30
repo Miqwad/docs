@@ -52,7 +52,9 @@ Adapters are built against **WireMock** until sandbox access lands, so developme
 
 > ### ✅ Decided: **official ZATCA SDK R4.0.0 embedded IN-PROCESS** — no sidecar, no reimplementation
 >
-> The SDK is run **in-process inside the JDK 25 modular monolith** (it targets Java 21 / Santuario 4.0.2 / a modern stack — verified to load & run on Java 21, and runs on JDK 25 by backward-compatibility). We do **not** reimplement the cryptographic stamping and we do **not** stand up a sidecar. **Caveats:** (1) the scaffold adds a **smoke test of a real sign on JDK 25** as an acceptance gate; (2) onboard against the **GA R4.x** line (R4.0.0 is beta, shipping `3.0-SNAPSHOT` internal libs); (3) **fallback only if the JDK-25 smoke test fails** = pin just the ZATCA path to a Java-21 toolchain (the rest of the monolith stays on JDK 25).
+> The SDK is run **in-process inside the JDK 25 modular monolith**. **✅ Verified at scaffold (2026-06-30): the SDK's sign/hash pipeline runs on JDK 25** — the in-process smoke test (Santuario canonicalization + SHA-256 over a real sample invoice) passes, so the Java-21-toolchain fallback is **not** needed. We do **not** reimplement the cryptographic stamping and we do **not** stand up a sidecar.
+>
+> **⚠️ Packaging caveat (F-7), found at scaffold:** the official R4.0.0 jar is a **fat jar that bundles an entire Spring Framework** (~3,000 `org.springframework` classes) plus Jackson/Saxon/HttpClient, so it **cannot sit on the application classpath** — it shadows Spring 7 (`NoSuchMethodError`). Embed it via an **isolated child-first classloader** (preferred — keeps the vendor crypto jar byte-for-byte, isolates *all* bundled conflicts) or a **relocated/repackaged jar**, in both cases behind the `ZatcaSigner` port. In the walking skeleton the jar is **compile-only** and exercised by an **isolated smoke test**, so it cannot affect the running app. Also: onboard against the **GA R4.x** line (R4.0.0 is beta, shipping `3.0-SNAPSHOT` internal libs).
 
 **Split of work — SDK (offline) vs adapter (online):**
 
