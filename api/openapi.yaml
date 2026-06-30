@@ -1,0 +1,1367 @@
+# ============================================================================
+# PROVISIONAL — integration-facing contracts (Tajeer, ZATCA, Wasl, Absher,
+# Moyasar payments, notifications) are refined on receipt of official vendor
+# documentation + credential onboarding. See docs/STATUS.md (P-1..P-6).
+# Payments: Moyasar only. Integration-touching schemas note this inline.
+# Snapshot dated 2026-06-30.
+# ============================================================================
+openapi: 3.1.0
+info:
+  title: Miqwad Platform API
+  version: 1.0.0
+  description: >
+    Miqwad — multi-tenant car-rental operating system + marketplace for Saudi Arabia.
+    The API is organized into three surfaces sharing common schemas:
+      * Customer  (/customer/*)  — consumer mobile app
+      * Dealer    (/dealer/*)    — dealership SaaS portal (tenant-scoped)
+      * Admin     (/admin/*)     — Miqwad platform team
+    Money is integer halalas (1 SAR = 100 halalas). All timestamps are RFC3339 UTC.
+    Tenant isolation: dealer endpoints derive dealership_id from the bearer token, never the request body.
+  contact:
+    name: Miqwad Engineering
+servers:
+  - url: https://api.miqwad.sa/v1
+    description: Production
+  - url: https://staging-api.miqwad.sa/v1
+    description: Staging
+
+tags:
+  - name: Customer Auth
+  - name: Customer Catalog
+  - name: Customer Bookings
+  - name: Dealer Auth
+  - name: Dealer Fleet
+  - name: Dealer Availability
+  - name: Dealer Bookings
+  - name: Dealer Handover
+  - name: Dealer Maintenance
+  - name: Dealer Tracking
+  - name: Dealer Branches
+  - name: Dealer Finance
+  - name: Dealer Delivery
+  - name: Dealer Reviews
+  - name: Dealer Violations
+  - name: Dealer Notifications
+  - name: Dealer Connections
+  - name: Dealer Import
+  - name: Dealer Subscription
+  - name: Admin
+  - name: Admin Plans
+
+security:
+  - bearerAuth: []
+
+paths:
+
+  # ===================== CUSTOMER — AUTH =====================
+  /customer/auth/request-otp:
+    post:
+      tags: [Customer Auth]
+      summary: Request a login OTP by phone
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone]
+              properties:
+                phone: { type: string, example: "+9665XXXXXXXX" }
+      responses:
+        "200":
+          description: OTP dispatched
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  request_id: { type: string }
+                  expires_in: { type: integer, example: 300 }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /customer/auth/verify-otp:
+    post:
+      tags: [Customer Auth]
+      summary: Verify OTP and obtain tokens
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [request_id, code]
+              properties:
+                request_id: { type: string }
+                code: { type: string, example: "1234" }
+      responses:
+        "200":
+          description: Authenticated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthTokens" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /customer/me:
+    get:
+      tags: [Customer Auth]
+      summary: Get current customer profile
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Customer" }
+    patch:
+      tags: [Customer Auth]
+      summary: Update profile
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CustomerUpdate" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Customer" }
+
+  # ===================== CUSTOMER — CATALOG / SEARCH =====================
+  /customer/search:
+    get:
+      tags: [Customer Catalog]
+      summary: Search available vehicles across all dealerships
+      description: >
+        Returns marketplace listings whose vehicle is available for the entire
+        requested window (no overlapping availability_block) and within range.
+      parameters:
+        - { name: city, in: query, schema: { type: string }, example: "Khobar" }
+        - { name: lat, in: query, schema: { type: number } }
+        - { name: lng, in: query, schema: { type: number } }
+        - { name: radius_km, in: query, schema: { type: integer, default: 25 } }
+        - { name: pickup_at, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: return_at, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: category, in: query, schema: { type: string, enum: [economy, sedan, suv, luxury, van, pickup] } }
+        - { name: min_price, in: query, schema: { type: integer, description: halalas/day } }
+        - { name: max_price, in: query, schema: { type: integer } }
+        - { name: transmission, in: query, schema: { type: string, enum: [automatic, manual] } }
+        - { name: sort, in: query, schema: { type: string, enum: [price_asc, price_desc, distance, rating], default: price_asc } }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Paginated"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/Listing" }
+
+  /customer/listings/{listingId}:
+    get:
+      tags: [Customer Catalog]
+      summary: Get a single listing with full pricing for the window
+      parameters:
+        - { name: listingId, in: path, required: true, schema: { type: string } }
+        - { name: pickup_at, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: return_at, in: query, required: true, schema: { type: string, format: date-time } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ListingDetail" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ===================== CUSTOMER — BOOKINGS =====================
+  /customer/bookings:
+    get:
+      tags: [Customer Bookings]
+      summary: List my bookings
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [pending, confirmed, active, completed, cancelled] } }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Paginated"
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: "#/components/schemas/Booking" } }
+    post:
+      tags: [Customer Bookings]
+      summary: Create a booking (quote -> reserve)
+      description: Creates a pending booking and returns a payment intent for the rental + refundable deposit hold.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [vehicle_id, pickup_branch_id, pickup_at, return_at]
+              properties:
+                vehicle_id: { type: string }
+                pickup_branch_id: { type: string }
+                return_branch_id: { type: string }
+                pickup_at: { type: string, format: date-time }
+                return_at: { type: string, format: date-time }
+      responses:
+        "201":
+          description: Booking created (pending payment)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  booking: { $ref: "#/components/schemas/Booking" }
+                  payment_intent: { $ref: "#/components/schemas/PaymentIntent" }
+        "409":
+          description: Vehicle no longer available for the window
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /customer/bookings/{bookingId}:
+    get:
+      tags: [Customer Bookings]
+      summary: Get booking detail (incl. contract + handover photos)
+      parameters:
+        - { name: bookingId, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BookingDetail" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /customer/bookings/{bookingId}/cancel:
+    post:
+      tags: [Customer Bookings]
+      summary: Cancel a booking
+      parameters:
+        - { name: bookingId, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Cancelled
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Booking" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /customer/bookings/{bookingId}/confirm-payment:
+    post:
+      tags: [Customer Bookings]
+      summary: Confirm payment result and finalize the booking
+      parameters:
+        - { name: bookingId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [payment_ref]
+              properties:
+                payment_ref: { type: string, description: Moyasar payment id }
+      responses:
+        "200":
+          description: Confirmed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BookingDetail" }
+
+  # ===================== DEALER — AUTH =====================
+  /dealer/auth/login:
+    post:
+      tags: [Dealer Auth]
+      summary: Staff login (delegated to identity provider; returns platform tokens)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string }
+                password: { type: string, format: password }
+      responses:
+        "200":
+          description: Authenticated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthTokens" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /dealer/me:
+    get:
+      tags: [Dealer Auth]
+      summary: Current staff user + dealership context
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StaffContext" }
+
+  /dealer/dashboard:
+    get:
+      tags: [Dealer Auth]
+      summary: Dealership dashboard summary
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DealerDashboard" }
+
+  # ===================== DEALER — BRANCHES (multi-branch) =====================
+  /dealer/branches:
+    get:
+      tags: [Dealer Branches]
+      summary: List branches
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Branch" } }
+    post:
+      tags: [Dealer Branches]
+      summary: Create a branch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BranchInput" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Branch" }
+  /dealer/branches/{branchId}:
+    patch:
+      tags: [Dealer Branches]
+      summary: Update a branch
+      parameters: [ { name: branchId, in: path, required: true, schema: { type: string } } ]
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BranchInput" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Branch" }
+
+  # ===================== DEALER — FLEET =====================
+  /dealer/vehicles:
+    get:
+      tags: [Dealer Fleet]
+      summary: List fleet
+      parameters:
+        - { name: branch_id, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string, enum: [available, rented, maintenance, out_of_service, draft] } }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Paginated"
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: "#/components/schemas/Vehicle" } }
+    post:
+      tags: [Dealer Fleet]
+      summary: Add a vehicle
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/VehicleInput" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Vehicle" }
+  /dealer/vehicles/{vehicleId}:
+    get:
+      tags: [Dealer Fleet]
+      summary: Get vehicle (incl. docs, images, rate plan, maintenance status)
+      parameters: [ { name: vehicleId, in: path, required: true, schema: { type: string } } ]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VehicleDetail" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [Dealer Fleet]
+      summary: Update vehicle
+      parameters: [ { name: vehicleId, in: path, required: true, schema: { type: string } } ]
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/VehicleInput" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Vehicle" }
+  /dealer/vehicles/{vehicleId}/rate-plan:
+    put:
+      tags: [Dealer Fleet]
+      summary: Set the vehicle rate plan
+      parameters: [ { name: vehicleId, in: path, required: true, schema: { type: string } } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RatePlan" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RatePlan" }
+  /dealer/vehicles/{vehicleId}/images:
+    post:
+      tags: [Dealer Fleet]
+      summary: Attach an image (returns upload URL)
+      parameters: [ { name: vehicleId, in: path, required: true, schema: { type: string } } ]
+      responses:
+        "201":
+          description: Upload target issued
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UploadTarget" }
+
+  # ===================== DEALER — AVAILABILITY =====================
+  /dealer/vehicles/{vehicleId}/availability:
+    get:
+      tags: [Dealer Availability]
+      summary: Get availability blocks (calendar) for a vehicle
+      parameters:
+        - { name: vehicleId, in: path, required: true, schema: { type: string } }
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/AvailabilityBlock" } }
+    post:
+      tags: [Dealer Availability]
+      summary: Create a manual hold / block
+      parameters: [ { name: vehicleId, in: path, required: true, schema: { type: string } } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [start_at, end_at, reason]
+              properties:
+                start_at: { type: string, format: date-time }
+                end_at: { type: string, format: date-time }
+                reason: { type: string, enum: [manual_hold, transfer] }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AvailabilityBlock" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  # ===================== DEALER — BOOKINGS =====================
+  /dealer/bookings:
+    get:
+      tags: [Dealer Bookings]
+      summary: List incoming/active bookings
+      parameters:
+        - { name: status, in: query, schema: { type: string } }
+        - { name: branch_id, in: query, schema: { type: string } }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Paginated"
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: "#/components/schemas/Booking" } }
+  /dealer/bookings/{bookingId}:
+    get:
+      tags: [Dealer Bookings]
+      summary: Booking detail
+      parameters: [ { name: bookingId, in: path, required: true, schema: { type: string } } ]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BookingDetail" }
+  /dealer/bookings/{bookingId}/confirm:
+    post:
+      tags: [Dealer Bookings]
+      summary: Confirm a booking and trigger Tajeer contract registration
+      parameters: [ { name: bookingId, in: path, required: true, schema: { type: string } } ]
+      responses:
+        "200":
+          description: Confirmed; rental_contract created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BookingDetail" }
+        "422":
+          description: Tajeer registration failed (see contract.status)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  # ===================== DEALER — HANDOVER / INSPECTION =====================
+  /dealer/bookings/{bookingId}/inspections:
+    post:
+      tags: [Dealer Handover]
+      summary: Create a handover or return inspection
+      parameters: [ { name: bookingId, in: path, required: true, schema: { type: string } } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, odometer_km, fuel_level]
+              properties:
+                type: { type: string, enum: [handover, return] }
+                odometer_km: { type: integer }
+                fuel_level: { type: string, enum: ["1/8","1/4","3/8","1/2","5/8","3/4","7/8","full"] }
+                notes: { type: string }
+      responses:
+        "201":
+          description: Inspection created (attach photos next)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Inspection" }
+  /dealer/inspections/{inspectionId}/photos:
+    post:
+      tags: [Dealer Handover]
+      summary: Attach a geotagged, timestamped inspection photo (returns upload URL)
+      parameters: [ { name: inspectionId, in: path, required: true, schema: { type: string } } ]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [angle]
+              properties:
+                angle: { type: string, enum: [front, rear, left, right, interior, odometer, damage, other] }
+                geo_lat: { type: number }
+                geo_lng: { type: number }
+                captured_at: { type: string, format: date-time }
+      responses:
+        "201":
+          description: Upload target issued
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UploadTarget" }
+  /dealer/inspections/{inspectionId}/damages:
+    post:
+      tags: [Dealer Handover]
+      summary: Record a damage finding
+      parameters: [ { name: inspectionId, in: path, required: true, schema: { type: string } } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [area, severity]
+              properties:
+                area: { type: string }
+                severity: { type: string, enum: [minor, moderate, major] }
+                description: { type: string }
+                estimated_amount: { type: integer }
+                photo_id: { type: string }
+      responses:
+        "201":
+          description: Recorded
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DamageRecord" }
+
+  # ===================== DEALER — MAINTENANCE =====================
+  /dealer/vehicles/{vehicleId}/maintenance-schedules:
+    get:
+      tags: [Dealer Maintenance]
+      summary: List preventive maintenance schedules
+      parameters: [ { name: vehicleId, in: path, required: true, schema: { type: string } } ]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/MaintenanceSchedule" } }
+    post:
+      tags: [Dealer Maintenance]
+      summary: Create a preventive schedule
+      parameters: [ { name: vehicleId, in: path, required: true, schema: { type: string } } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MaintenanceScheduleInput" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MaintenanceSchedule" }
+  /dealer/work-orders:
+    get:
+      tags: [Dealer Maintenance]
+      summary: List work orders (maintenance tracking)
+      parameters:
+        - { name: vehicle_id, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string, enum: [scheduled, in_progress, completed, cancelled] } }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Paginated"
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: "#/components/schemas/WorkOrder" } }
+    post:
+      tags: [Dealer Maintenance]
+      summary: Open a work order (blocks the vehicle for the service window)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WorkOrderInput" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WorkOrder" }
+  /dealer/work-orders/{workOrderId}:
+    patch:
+      tags: [Dealer Maintenance]
+      summary: Update / complete a work order
+      parameters: [ { name: workOrderId, in: path, required: true, schema: { type: string } } ]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status: { type: string, enum: [scheduled, in_progress, completed, cancelled] }
+                odometer_km: { type: integer }
+                cost_amount: { type: integer }
+                vendor_name: { type: string }
+                completed_at: { type: string, format: date-time }
+                notes: { type: string }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WorkOrder" }
+
+  # ===================== DEALER — FLEET TRACKING =====================
+  /dealer/tracking/live:
+    get:
+      tags: [Dealer Tracking]
+      summary: Live positions and status of the whole fleet
+      parameters:
+        - { name: branch_id, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/VehicleLive" } }
+  /dealer/tracking/vehicles/{vehicleId}/history:
+    get:
+      tags: [Dealer Tracking]
+      summary: Telemetry history (trip/route review)
+      parameters:
+        - { name: vehicleId, in: path, required: true, schema: { type: string } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/TelemetryPing" } }
+  /dealer/tracking/ingest:
+    post:
+      tags: [Dealer Tracking]
+      summary: Ingest a telemetry ping (device/gateway → platform)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TelemetryPing" }
+      responses:
+        "202": { description: Accepted }
+
+  # ===================== DEALER — FINANCE =====================
+  /dealer/invoices:
+    get:
+      tags: [Dealer Finance]
+      summary: List ZATCA invoices
+      parameters:
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Paginated"
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: "#/components/schemas/Invoice" } }
+  /dealer/payouts:
+    get:
+      tags: [Dealer Finance]
+      summary: List settlement payouts
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Payout" } }
+
+  # ===================== ADMIN =====================
+  /admin/dealerships:
+    get:
+      tags: [Admin]
+      summary: List dealerships (platform team)
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [pending, active, suspended, rejected] } }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Paginated"
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: "#/components/schemas/Dealership" } }
+  /admin/dealerships/{dealershipId}/approve:
+    post:
+      tags: [Admin]
+      summary: Approve a pending dealership
+      parameters: [ { name: dealershipId, in: path, required: true, schema: { type: string } } ]
+      responses:
+        "200":
+          description: Approved
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Dealership" }
+  /admin/dealerships/{dealershipId}/commission:
+    put:
+      tags: [Admin]
+      summary: Set commission / SaaS plan for a dealership
+      parameters: [ { name: dealershipId, in: path, required: true, schema: { type: string } } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CommissionConfig" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CommissionConfig" }
+  /admin/overview:
+    get:
+      tags: [Admin]
+      summary: Platform-wide KPIs
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminOverview" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    Cursor:
+      name: cursor
+      in: query
+      schema: { type: string }
+      description: Opaque pagination cursor
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, default: 20, maximum: 100 }
+
+  responses:
+    Unauthorized:
+      description: Authentication required or failed
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Conflict:
+      description: State conflict
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    RateLimited:
+      description: Too many requests
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string, example: "vehicle_unavailable" }
+            message: { type: string, example: "The vehicle is no longer available for the selected dates." }
+            details: { type: object, additionalProperties: true }
+        request_id: { type: string }
+
+    Paginated:
+      type: object
+      properties:
+        data: { type: array, items: {} }
+        next_cursor: { type: string, nullable: true }
+        has_more: { type: boolean }
+
+    Money:
+      type: object
+      description: Amount in integer halalas plus currency
+      properties:
+        amount: { type: integer, example: 15000, description: "150.00 SAR" }
+        currency: { type: string, example: "SAR" }
+
+    AuthTokens:
+      type: object
+      properties:
+        access_token: { type: string }
+        refresh_token: { type: string }
+        token_type: { type: string, example: "Bearer" }
+        expires_in: { type: integer, example: 3600 }
+
+    Customer:
+      type: object
+      properties:
+        id: { type: string }
+        full_name: { type: string }
+        phone: { type: string }
+        email: { type: string }
+        absher_verified: { type: boolean }
+        status: { type: string, enum: [active, blocked] }
+    CustomerUpdate:
+      type: object
+      properties:
+        full_name: { type: string }
+        email: { type: string }
+
+    Branch:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        city: { type: string }
+        address: { type: string }
+        geo_lat: { type: number }
+        geo_lng: { type: number }
+        working_hours: { type: object, additionalProperties: true }
+        status: { type: string, enum: [active, inactive] }
+    BranchInput:
+      type: object
+      required: [name, city]
+      properties:
+        name: { type: string }
+        city: { type: string }
+        address: { type: string }
+        geo_lat: { type: number }
+        geo_lng: { type: number }
+        working_hours: { type: object, additionalProperties: true }
+
+    Vehicle:
+      type: object
+      properties:
+        id: { type: string }
+        branch_id: { type: string }
+        category: { type: string }
+        make: { type: string }
+        model: { type: string }
+        year: { type: integer }
+        trim: { type: string }
+        plate_number: { type: string }
+        color: { type: string }
+        transmission: { type: string, enum: [automatic, manual] }
+        fuel_type: { type: string, enum: [petrol, diesel, hybrid, electric] }
+        seats: { type: integer }
+        odometer_km: { type: integer }
+        status: { type: string, enum: [available, rented, maintenance, out_of_service, draft] }
+        primary_image_url: { type: string }
+    VehicleInput:
+      type: object
+      required: [branch_id, make, model, year, plate_number, category]
+      properties:
+        branch_id: { type: string }
+        category: { type: string }
+        make: { type: string }
+        model: { type: string }
+        year: { type: integer }
+        trim: { type: string }
+        plate_number: { type: string }
+        plate_type: { type: string }
+        vin: { type: string }
+        color: { type: string }
+        transmission: { type: string, enum: [automatic, manual] }
+        fuel_type: { type: string, enum: [petrol, diesel, hybrid, electric] }
+        seats: { type: integer }
+        odometer_km: { type: integer }
+        operating_card_no: { type: string }
+        operating_card_expiry: { type: string, format: date }
+        insurance_policy_no: { type: string }
+        insurance_expiry: { type: string, format: date }
+    VehicleDetail:
+      allOf:
+        - $ref: "#/components/schemas/Vehicle"
+        - type: object
+          properties:
+            images: { type: array, items: { type: object, properties: { id: {type: string}, url: {type: string} } } }
+            documents: { type: array, items: { $ref: "#/components/schemas/VehicleDocument" } }
+            rate_plan: { $ref: "#/components/schemas/RatePlan" }
+            maintenance_status: { type: string, enum: [ok, due_soon, overdue] }
+    VehicleDocument:
+      type: object
+      properties:
+        id: { type: string }
+        doc_type: { type: string, enum: [istimara, insurance, operating_card] }
+        number: { type: string }
+        expiry_date: { type: string, format: date }
+        url: { type: string }
+
+    RatePlan:
+      type: object
+      properties:
+        daily_amount: { type: integer }
+        weekly_amount: { type: integer }
+        monthly_amount: { type: integer }
+        deposit_amount: { type: integer }
+        included_km_per_day: { type: integer }
+        extra_km_amount: { type: integer }
+        min_rental_days: { type: integer }
+        max_rental_days: { type: integer }
+
+    AvailabilityBlock:
+      type: object
+      properties:
+        id: { type: string }
+        vehicle_id: { type: string }
+        start_at: { type: string, format: date-time }
+        end_at: { type: string, format: date-time }
+        reason: { type: string, enum: [booking, maintenance, manual_hold, transfer] }
+        booking_id: { type: string, nullable: true }
+        work_order_id: { type: string, nullable: true }
+
+    Listing:
+      type: object
+      properties:
+        listing_id: { type: string }
+        vehicle_id: { type: string }
+        dealership_name: { type: string }
+        branch_city: { type: string }
+        make: { type: string }
+        model: { type: string }
+        year: { type: integer }
+        category: { type: string }
+        transmission: { type: string }
+        seats: { type: integer }
+        image_url: { type: string }
+        daily_amount: { type: integer }
+        distance_km: { type: number }
+        rating: { type: number, nullable: true }
+    ListingDetail:
+      allOf:
+        - $ref: "#/components/schemas/Listing"
+        - type: object
+          properties:
+            images: { type: array, items: { type: string } }
+            features: { type: array, items: { type: string } }
+            quote:
+              type: object
+              properties:
+                days: { type: integer }
+                rental_amount: { type: integer }
+                deposit_amount: { type: integer }
+                vat_amount: { type: integer }
+                total_amount: { type: integer }
+                included_km: { type: integer }
+                extra_km_amount: { type: integer }
+
+    PaymentIntent:
+      type: object
+      properties:
+        provider: { type: string, enum: [moyasar] }  # provisional: payment contract pending Moyasar API docs (STATUS P-5)
+        client_secret: { type: string }
+        amount: { type: integer }
+        currency: { type: string, example: "SAR" }
+        breakdown:
+          type: object
+          properties:
+            rental_amount: { type: integer }
+            deposit_amount: { type: integer }
+            vat_amount: { type: integer }
+
+    Booking:
+      type: object
+      properties:
+        id: { type: string }
+        status: { type: string, enum: [pending, confirmed, active, completed, cancelled, no_show] }
+        customer_id: { type: string }
+        vehicle_id: { type: string }
+        pickup_branch_id: { type: string }
+        return_branch_id: { type: string }
+        pickup_at: { type: string, format: date-time }
+        return_at: { type: string, format: date-time }
+        rental_amount: { type: integer }
+        deposit_amount: { type: integer }
+        vat_amount: { type: integer }
+        total_amount: { type: integer }
+        channel: { type: string, enum: [marketplace, dealer_direct] }
+        created_at: { type: string, format: date-time }
+    BookingDetail:
+      allOf:
+        - $ref: "#/components/schemas/Booking"
+        - type: object
+          properties:
+            vehicle: { $ref: "#/components/schemas/Vehicle" }
+            contract: { $ref: "#/components/schemas/RentalContract" }
+            invoice: { $ref: "#/components/schemas/Invoice" }
+            inspections: { type: array, items: { $ref: "#/components/schemas/Inspection" } }
+            payments: { type: array, items: { $ref: "#/components/schemas/Payment" } }
+
+    RentalContract:
+      type: object
+      properties:
+        id: { type: string }
+        contract_number: { type: string }
+        tajeer_contract_ref: { type: string, nullable: true }
+        status: { type: string, enum: [draft, submitted, registered, closed, failed] }
+        signed_at: { type: string, format: date-time, nullable: true }
+
+    Inspection:
+      type: object
+      properties:
+        id: { type: string }
+        type: { type: string, enum: [handover, return] }
+        odometer_km: { type: integer }
+        fuel_level: { type: string }
+        signed_at: { type: string, format: date-time, nullable: true }
+        photos: { type: array, items: { $ref: "#/components/schemas/InspectionPhoto" } }
+        damages: { type: array, items: { $ref: "#/components/schemas/DamageRecord" } }
+    InspectionPhoto:
+      type: object
+      properties:
+        id: { type: string }
+        url: { type: string }
+        angle: { type: string }
+        captured_at: { type: string, format: date-time }
+        geo_lat: { type: number }
+        geo_lng: { type: number }
+    DamageRecord:
+      type: object
+      properties:
+        id: { type: string }
+        area: { type: string }
+        severity: { type: string, enum: [minor, moderate, major] }
+        description: { type: string }
+        estimated_amount: { type: integer }
+        photo_id: { type: string }
+
+    Payment:
+      type: object
+      properties:
+        id: { type: string }
+        type: { type: string, enum: [rental, deposit_hold, deposit_capture, deposit_refund, extra_charge, fine] }
+        amount: { type: integer }
+        method: { type: string, enum: [mada, visa, mastercard, apple_pay, stc_pay] }
+        provider: { type: string, enum: [moyasar] }  # provisional: payment contract pending Moyasar API docs (STATUS P-5)
+        status: { type: string, enum: [initiated, authorized, captured, failed, refunded] }
+
+    Invoice:
+      type: object
+      properties:
+        id: { type: string }
+        invoice_number: { type: string }
+        type: { type: string, enum: [simplified, standard] }
+        subtotal_amount: { type: integer }
+        vat_amount: { type: integer }
+        total_amount: { type: integer }
+        zatca_uuid: { type: string, nullable: true }
+        qr_payload: { type: string, nullable: true }
+        clearance_status: { type: string, enum: [pending, cleared, reported, failed] }
+        issued_at: { type: string, format: date-time }
+
+    MaintenanceSchedule:
+      type: object
+      properties:
+        id: { type: string }
+        vehicle_id: { type: string }
+        maintenance_type: { type: string }
+        interval_km: { type: integer, nullable: true }
+        interval_days: { type: integer, nullable: true }
+        last_done_km: { type: integer, nullable: true }
+        last_done_at: { type: string, format: date-time, nullable: true }
+        next_due_km: { type: integer, nullable: true }
+        next_due_at: { type: string, format: date-time, nullable: true }
+        status: { type: string, enum: [ok, due_soon, overdue] }
+    MaintenanceScheduleInput:
+      type: object
+      required: [maintenance_type]
+      properties:
+        maintenance_type: { type: string }
+        interval_km: { type: integer }
+        interval_days: { type: integer }
+        last_done_km: { type: integer }
+        last_done_at: { type: string, format: date-time }
+
+    WorkOrder:
+      type: object
+      properties:
+        id: { type: string }
+        vehicle_id: { type: string }
+        maintenance_type: { type: string }
+        schedule_id: { type: string, nullable: true }
+        status: { type: string, enum: [scheduled, in_progress, completed, cancelled] }
+        odometer_km: { type: integer }
+        vendor_name: { type: string }
+        cost_amount: { type: integer }
+        scheduled_for: { type: string, format: date-time }
+        started_at: { type: string, format: date-time, nullable: true }
+        completed_at: { type: string, format: date-time, nullable: true }
+        notes: { type: string }
+    WorkOrderInput:
+      type: object
+      required: [vehicle_id, maintenance_type, scheduled_for]
+      properties:
+        vehicle_id: { type: string }
+        maintenance_type: { type: string }
+        schedule_id: { type: string }
+        scheduled_for: { type: string, format: date-time }
+        vendor_name: { type: string }
+        notes: { type: string }
+
+    TelemetryPing:
+      type: object
+      required: [vehicle_id, geo_lat, geo_lng, recorded_at]
+      properties:
+        vehicle_id: { type: string }
+        geo_lat: { type: number }
+        geo_lng: { type: number }
+        speed_kmh: { type: integer }
+        odometer_km: { type: integer }
+        ignition: { type: boolean }
+        source: { type: string, enum: [gps_device, obd, manual, wasl] }
+        recorded_at: { type: string, format: date-time }
+    VehicleLive:
+      type: object
+      properties:
+        vehicle_id: { type: string }
+        plate_number: { type: string }
+        make: { type: string }
+        model: { type: string }
+        status: { type: string }
+        geo_lat: { type: number }
+        geo_lng: { type: number }
+        speed_kmh: { type: integer }
+        ignition: { type: boolean }
+        odometer_km: { type: integer }
+        last_seen_at: { type: string, format: date-time }
+
+    Payout:
+      type: object
+      properties:
+        id: { type: string }
+        period_start: { type: string, format: date }
+        period_end: { type: string, format: date }
+        gross_amount: { type: integer }
+        commission_amount: { type: integer }
+        net_amount: { type: integer }
+        status: { type: string, enum: [pending, paid] }
+        paid_at: { type: string, format: date-time, nullable: true }
+
+    UploadTarget:
+      type: object
+      properties:
+        upload_url: { type: string }
+        file_key: { type: string }
+        method: { type: string, example: "PUT" }
+        expires_in: { type: integer }
+
+    StaffContext:
+      type: object
+      properties:
+        user:
+          type: object
+          properties:
+            id: { type: string }
+            name: { type: string }
+            role: { type: string, enum: [owner, manager, branch_agent, accountant] }
+            branch_id: { type: string, nullable: true }
+        dealership:
+          type: object
+          properties:
+            id: { type: string }
+            display_name: { type: string }
+            status: { type: string }
+            zatca_onboarded: { type: boolean }
+            tajeer_connected: { type: boolean }
+
+    DealerDashboard:
+      type: object
+      properties:
+        fleet_total: { type: integer }
+        fleet_available: { type: integer }
+        fleet_rented: { type: integer }
+        fleet_maintenance: { type: integer }
+        bookings_today: { type: integer }
+        pending_confirmations: { type: integer }
+        revenue_month: { type: integer }
+        maintenance_overdue: { type: integer }
+        utilization_rate: { type: number, description: "0..1" }
+
+    Dealership:
+      type: object
+      properties:
+        id: { type: string }
+        legal_name: { type: string }
+        display_name: { type: string }
+        cr_number: { type: string }
+        tga_license_no: { type: string }
+        status: { type: string, enum: [pending, active, suspended, rejected] }
+        branches_count: { type: integer }
+        vehicles_count: { type: integer }
+        created_at: { type: string, format: date-time }
+
+    CommissionConfig:
+      type: object
+      properties:
+        base_rate_bps: { type: integer, example: 1200, description: "12.00%" }
+        saas_plan: { type: string, enum: [free, standard, pro] }
+        per_vehicle_fee_amount: { type: integer }
+        per_branch_fee_amount: { type: integer }
+        effective_from: { type: string, format: date }
+
+    AdminOverview:
+      type: object
+      properties:
+        dealerships_active: { type: integer }
+        dealerships_pending: { type: integer }
+        vehicles_total: { type: integer }
+        bookings_month: { type: integer }
+        gmv_month: { type: integer }
+        commission_month: { type: integer }
+        top_cities: { type: array, items: { type: object, properties: { city: {type: string}, bookings: {type: integer} } } }
+
+# =====================================================================
+# V1 RE-SCOPE ADDITIONS (2026-06) — paths/schemas to be expanded here.
+# Human-readable detail in 04_Miqwad_API_Reference.md; conventions in
+# 17_Miqwad_Error_Catalog_API_Conventions.md. Decisions in 21 (ADR).
+#
+# New tags above are served by these endpoints (all dealer endpoints are
+# entitlement-gated: 403 entitlement_module_disabled / 402 entitlement_limit_reached):
+#
+#   Bookings (channels):
+#     POST   /dealer/bookings                      # walk_in | dealer_direct | external_aggregator (+channel_source); no commission unless marketplace
+#   Delivery:
+#     GET/POST  /dealer/bookings/{id}/deliveries
+#     PATCH     /dealer/deliveries/{id}
+#   Reviews:
+#     GET    /dealer/reviews
+#     POST   /customer/bookings/{id}/review
+#   Violations (Saher):
+#     GET/POST  /dealer/violations
+#     POST      /dealer/violations/{id}/attribute
+#   Notifications:
+#     GET    /dealer/notifications
+#     GET/PUT /dealer/notification-preferences
+#   Connections (gov credential wizard):
+#     GET    /dealer/connections
+#     POST   /dealer/connections/{system}          # tajeer|zatca|wasl — stored in vault, never returned
+#   Import / migration:
+#     GET    /dealer/imports/templates/{entity}
+#     POST   /dealer/imports
+#     GET    /dealer/imports/{id}
+#     POST   /dealer/imports/{id}/commit           # imported gov docs flagged 'imported', never re-submitted
+#   Subscription / packaging:
+#     GET    /dealer/subscription
+#     GET    /admin/plans
+#     PUT    /admin/dealerships/{id}/subscription
+#     GET    /admin/dealerships/{id}/entitlement
+#
+# New schemas (to add under components.schemas): Plan, Subscription, Entitlement,
+# Delivery, Review, TrafficViolation, ImportBatch, ImportRow, ConnectionStatus,
+# NotificationLog. The Booking schema gains channel ∈ {marketplace,dealer_direct,
+# walk_in,external_aggregator}, channel_source, source ∈ {live,imported}.
+# The Invoice schema gains direction ∈ {dealer_to_customer,platform_to_dealer} and source.
+# Error 'code' enum gains: entitlement_module_disabled, entitlement_package_excluded,
+# entitlement_limit_reached. All money/external POSTs accept Idempotency-Key header.
+# =====================================================================
