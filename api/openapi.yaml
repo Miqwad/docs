@@ -27,6 +27,7 @@ servers:
     description: Staging
 
 tags:
+  - name: Meta
   - name: Customer Auth
   - name: Customer Catalog
   - name: Customer Bookings
@@ -47,12 +48,28 @@ tags:
   - name: Dealer Import
   - name: Dealer Subscription
   - name: Admin
+  - name: Admin Bookings
   - name: Admin Plans
 
 security:
   - bearerAuth: []
 
 paths:
+
+  # ===================== META (app version / config gate) =====================
+  /meta:
+    get:
+      tags: [Meta]
+      summary: App version + config gate
+      # Unauthenticated: called on launch before any sign-in to decide force-update.
+      security: []
+      description: Minimum/latest supported client versions and an optional force-update flag + message. Called by the mobile app on launch.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MetaConfig" }
 
   # ===================== CUSTOMER — AUTH =====================
   /customer/auth/request-otp:
@@ -128,26 +145,90 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Customer" }
 
+  /customer/me/documents:
+    post:
+      tags: [Customer Auth]
+      summary: Submit KYC identity + license details
+      description: >
+        Captures the renter's identity and driving-license details for KYC.
+        Data-entry only in V1 — no external Absher verification call is made in
+        the contract yet (STATUS P-4); the record moves kyc_status to `pending`
+        and the fields are stored encrypted (customer_document). Full id_number
+        and license_no are write-only and never returned by /customer/me.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id_type, id_number, license_no, license_expiry]
+              properties:
+                id_type: { type: string, enum: [national_id, iqama] }
+                id_number: { type: string, description: "Write-only; stored encrypted, never returned." }
+                license_no: { type: string, description: "Write-only; stored encrypted, never returned." }
+                license_expiry: { type: string, format: date }
+      responses:
+        "200":
+          description: KYC details captured; returns the updated profile with kyc_status
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Customer" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
   # ===================== CUSTOMER — CATALOG / SEARCH =====================
+  /customer/feed:
+    get:
+      tags: [Customer Catalog]
+      summary: Anonymous, dateless discovery feed
+      # Anonymous + dateless: the app's home surface before any sign-in or date pick.
+      security: []
+      description: >
+        Home-screen discovery for the marketplace. No auth and no dates required.
+        Returns curated sections (near_you, popular, categories, all), each a set
+        of Listing cards with indicative "from X/day" pricing only — the itemized
+        quote is computed later on /customer/listings/{id} once dates are chosen.
+        Served from the same Redis marketplace cache path as /customer/search;
+        introduces no new cross-tenant join.
+      parameters:
+        - { name: city, in: query, schema: { type: string }, example: "Khobar", description: "Provide city OR lat/lng." }
+        - { name: lat, in: query, schema: { type: number } }
+        - { name: lng, in: query, schema: { type: number } }
+        - { name: radius_km, in: query, schema: { type: integer, default: 25 } }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Feed" }
+
   /customer/search:
     get:
       tags: [Customer Catalog]
       summary: Search available vehicles across all dealerships
+      # Anonymous: browsable without a token so users can explore before signing in.
+      security: []
       description: >
-        Returns marketplace listings whose vehicle is available for the entire
-        requested window (no overlapping availability_block) and within range.
+        Returns marketplace listings across all dealerships within range.
+        When pickup_at/return_at are supplied, results are filtered to vehicles
+        available for the entire window (no overlapping availability_block) and
+        each listing carries the itemized quote. When dates are omitted, this is
+        a dateless browse returning indicative "from" pricing. Served from the
+        same Redis marketplace cache path as /customer/feed (no cross-tenant join).
       parameters:
         - { name: city, in: query, schema: { type: string }, example: "Khobar" }
         - { name: lat, in: query, schema: { type: number } }
         - { name: lng, in: query, schema: { type: number } }
         - { name: radius_km, in: query, schema: { type: integer, default: 25 } }
-        - { name: pickup_at, in: query, required: true, schema: { type: string, format: date-time } }
-        - { name: return_at, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: pickup_at, in: query, schema: { type: string, format: date-time }, description: "Optional. When set with return_at, filters to the exact window; when omitted, dateless browse." }
+        - { name: return_at, in: query, schema: { type: string, format: date-time }, description: "Optional. Pair with pickup_at for a dated search." }
         - { name: category, in: query, schema: { type: string, enum: [economy, sedan, suv, luxury, van, pickup] } }
         - { name: min_price, in: query, schema: { type: integer, description: halalas/day } }
         - { name: max_price, in: query, schema: { type: integer } }
         - { name: transmission, in: query, schema: { type: string, enum: [automatic, manual] } }
-        - { name: sort, in: query, schema: { type: string, enum: [price_asc, price_desc, distance, rating], default: price_asc } }
+        # "promoted" is reserved for paid placement; V1 returns organic order and never 4xx on it.
+        - { name: sort, in: query, schema: { type: string, enum: [price_asc, price_desc, distance, rating, promoted], default: price_asc } }
         - { $ref: "#/components/parameters/Cursor" }
         - { $ref: "#/components/parameters/Limit" }
       responses:
@@ -167,11 +248,17 @@ paths:
   /customer/listings/{listingId}:
     get:
       tags: [Customer Catalog]
-      summary: Get a single listing with full pricing for the window
+      summary: Get a single listing (itemized quote when a window is supplied)
+      # Anonymous: viewable without a token to support dateless browse / deep links.
+      security: []
+      description: >
+        With pickup_at/return_at, returns the full itemized quote for the window
+        (rental + refundable deposit + VAT + mileage policy). Without dates, returns
+        the listing with indicative "from" pricing and no quote block.
       parameters:
         - { name: listingId, in: path, required: true, schema: { type: string } }
-        - { name: pickup_at, in: query, required: true, schema: { type: string, format: date-time } }
-        - { name: return_at, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: pickup_at, in: query, schema: { type: string, format: date-time }, description: "Optional; supply with return_at to get the itemized quote." }
+        - { name: return_at, in: query, schema: { type: string, format: date-time }, description: "Optional; pair with pickup_at." }
       responses:
         "200":
           description: OK
@@ -281,6 +368,34 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/BookingDetail" }
+
+  /customer/bookings/{bookingId}/review:
+    post:
+      tags: [Customer Bookings]
+      summary: Rate the dealer/vehicle after a completed rental
+      description: Allowed only when the booking is `completed`; otherwise `409 conflict`. One review per booking.
+      parameters: [ { name: bookingId, in: path, required: true, schema: { type: string } } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rating]
+              properties:
+                rating: { type: integer, minimum: 1, maximum: 5 }
+                comment: { type: string }
+      responses:
+        "201":
+          description: Review created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Review" }
+        "409":
+          description: Booking is not completed (or already reviewed)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
   # ===================== DEALER — AUTH =====================
   /dealer/auth/login:
@@ -517,6 +632,42 @@ paths:
                   - type: object
                     properties:
                       data: { type: array, items: { $ref: "#/components/schemas/Booking" } }
+    post:
+      tags: [Dealer Bookings]
+      summary: Create a non-marketplace booking on behalf of a customer
+      description: >
+        Walk-in / phone / external-aggregator booking entered by staff. Writes an
+        availability_block (rejecting overlaps with `409 vehicle_unavailable`) and
+        runs the normal Tajeer / ZATCA / handover path. Commission never accrues
+        for these channels — only `channel = marketplace` does. `channel_source` is
+        required when channel is `external_aggregator`. Accepts an Idempotency-Key header.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [customer_id, vehicle_id, pickup_branch_id, pickup_at, return_at, channel]
+              properties:
+                customer_id: { type: string }
+                vehicle_id: { type: string }
+                pickup_branch_id: { type: string }
+                return_branch_id: { type: string }
+                pickup_at: { type: string, format: date-time }
+                return_at: { type: string, format: date-time }
+                channel: { type: string, enum: [walk_in, dealer_direct, external_aggregator], description: "Non-marketplace channels only; marketplace bookings arrive via the customer app." }
+                channel_source: { type: string, description: "Which external aggregator; required when channel = external_aggregator." }
+      responses:
+        "201":
+          description: Booking created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Booking" }
+        "409":
+          description: Vehicle not available for the window
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /dealer/bookings/{bookingId}:
     get:
       tags: [Dealer Bookings]
@@ -770,6 +921,337 @@ paths:
             application/json:
               schema: { type: array, items: { $ref: "#/components/schemas/Payout" } }
 
+  # ===================== DEALER — SUBSCRIPTION =====================
+  /dealer/subscription:
+    get:
+      tags: [Dealer Subscription]
+      summary: Current package/tier + resolved entitlements + billing status
+      description: The dealership's active package/tier, the effective (resolved) modules/limits it grants, and billing status. Read-only for the dealer; assignment is an admin action.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Subscription" }
+
+  # ===================== DEALER — DELIVERY / COLLECTION =====================
+  /dealer/bookings/{bookingId}/deliveries:
+    get:
+      tags: [Dealer Delivery]
+      summary: List deliveries/collections for a booking
+      parameters: [ { name: bookingId, in: path, required: true, schema: { type: string } } ]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Delivery" } }
+    post:
+      tags: [Dealer Delivery]
+      summary: Schedule a door-step delivery or collection
+      parameters: [ { name: bookingId, in: path, required: true, schema: { type: string } } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DeliveryInput" }
+      responses:
+        "201":
+          description: Scheduled
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Delivery" }
+  /dealer/deliveries/{deliveryId}:
+    patch:
+      tags: [Dealer Delivery]
+      summary: Update delivery status / assignment
+      parameters: [ { name: deliveryId, in: path, required: true, schema: { type: string } } ]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status: { type: string, enum: [scheduled, en_route, completed, cancelled] }
+                assigned_staff_id: { type: string }
+                address: { type: string }
+                geo_lat: { type: number }
+                geo_lng: { type: number }
+                window_start: { type: string, format: date-time }
+                window_end: { type: string, format: date-time }
+                fee_amount: { type: integer }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Delivery" }
+
+  # ===================== DEALER — CONNECTIONS (gov credential wizard) =====================
+  /dealer/connections:
+    get:
+      tags: [Dealer Connections]
+      summary: Government-system connection status
+      description: Connection state for Tajeer, ZATCA (CSID onboarding), and Wasl. Reports status only — never returns stored credentials.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/ConnectionStatus" } }
+  /dealer/connections/{system}:
+    post:
+      tags: [Dealer Connections]
+      summary: Submit / refresh credentials for a government system
+      description: >
+        Accepts the dealership's credentials for a government system and stores
+        them in the encrypted secrets vault (KMS/Vault) — never in the app DB and
+        never logged. The `credentials` fields are WRITE-ONLY: they are accepted
+        here but are never returned by any endpoint. Returns the resulting
+        connection status only.
+      parameters:
+        - { name: system, in: path, required: true, schema: { type: string, enum: [tajeer, zatca, wasl] } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                credentials:
+                  type: object
+                  description: "Write-only. Provider-specific credential fields (e.g. Naql username/password for Tajeer, CSID/OTP for ZATCA). Stored in the vault; never returned."
+                  additionalProperties: true
+      responses:
+        "200":
+          description: Credentials stored; returns connection status
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConnectionStatus" }
+        "422":
+          description: Credentials rejected by the provider
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  # ===================== DEALER — IMPORT / MIGRATION =====================
+  /dealer/imports/templates/{entity}:
+    get:
+      tags: [Dealer Import]
+      summary: Download the import template for an entity
+      description: Returns a presigned download URL for the CSV/Excel template for the given entity.
+      parameters:
+        - { name: entity, in: path, required: true, schema: { type: string, enum: [vehicle, customer, booking, contract, invoice, maintenance] } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  entity: { type: string }
+                  download_url: { type: string }
+                  format: { type: string, enum: [csv, xlsx] }
+                  expires_in: { type: integer }
+  /dealer/imports:
+    get:
+      tags: [Dealer Import]
+      summary: List import batches
+      parameters:
+        - { name: entity, in: query, schema: { type: string, enum: [vehicle, customer, booking, contract, invoice, maintenance] } }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Paginated"
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: "#/components/schemas/ImportBatch" } }
+    post:
+      tags: [Dealer Import]
+      summary: Create an import batch (upload a filled template)
+      description: Registers an uploaded file (via presigned URL) for an entity and kicks off validation. Rows are validated and quarantined individually; bad rows never fail the whole batch. Accepts an Idempotency-Key header.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [entity, file_key]
+              properties:
+                entity: { type: string, enum: [vehicle, customer, booking, contract, invoice, maintenance] }
+                file_key: { type: string, description: "Object key of the uploaded file (from an images/upload-style presigned PUT)." }
+      responses:
+        "201":
+          description: Batch created (validation started)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportBatch" }
+  /dealer/imports/{importId}:
+    get:
+      tags: [Dealer Import]
+      summary: Import batch status + per-row results
+      parameters: [ { name: importId, in: path, required: true, schema: { type: string } } ]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ImportBatch"
+                  - type: object
+                    properties:
+                      rows: { type: array, items: { $ref: "#/components/schemas/ImportRow" } }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /dealer/imports/{importId}/commit:
+    post:
+      tags: [Dealer Import]
+      summary: Commit the validated rows of a batch
+      description: >
+        Persists the validated (non-quarantined) rows. Idempotent — a replay
+        returns the original result. Imported Tajeer contracts and ZATCA invoices
+        are flagged `source = imported` and are excluded from registration/clearance
+        sagas — already filed with the government, never re-submitted. Accepts an
+        Idempotency-Key header.
+      parameters: [ { name: importId, in: path, required: true, schema: { type: string } } ]
+      responses:
+        "200":
+          description: Committed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportBatch" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  # ===================== DEALER — VIOLATIONS (Saher) =====================
+  /dealer/violations:
+    get:
+      tags: [Dealer Violations]
+      summary: List recorded traffic violations
+      parameters:
+        - { name: booking_id, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string, enum: [recorded, attributed, charged, disputed] } }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Paginated"
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: "#/components/schemas/TrafficViolation" } }
+    post:
+      tags: [Dealer Violations]
+      summary: Record a Saher fine incurred during a rental window
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TrafficViolationInput" }
+      responses:
+        "201":
+          description: Recorded
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TrafficViolation" }
+  /dealer/violations/{violationId}/attribute:
+    post:
+      tags: [Dealer Violations]
+      summary: Attribute the fine to the renter on record
+      description: Attributes the fine to the customer whose booking covered the violation time; moves status to `attributed`.
+      parameters: [ { name: violationId, in: path, required: true, schema: { type: string } } ]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                booking_id: { type: string, description: "Booking to attribute to; defaults to the one covering violation_at." }
+                notes: { type: string }
+      responses:
+        "200":
+          description: Attributed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TrafficViolation" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  # ===================== DEALER — REVIEWS =====================
+  /dealer/reviews:
+    get:
+      tags: [Dealer Reviews]
+      summary: List reviews for this dealership's bookings/vehicles
+      parameters:
+        - { name: vehicle_id, in: query, schema: { type: string } }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Paginated"
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: "#/components/schemas/Review" } }
+
+  # ===================== DEALER — NOTIFICATIONS =====================
+  /dealer/notifications:
+    get:
+      tags: [Dealer Notifications]
+      summary: Sent-notification log (communications history)
+      parameters:
+        - { name: channel, in: query, schema: { type: string, enum: [push, sms, email, in_app] } }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Paginated"
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: "#/components/schemas/NotificationLog" } }
+  /dealer/notification-preferences:
+    get:
+      tags: [Dealer Notifications]
+      summary: Get per-dealer notification channel preferences
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NotificationPreferences" }
+    put:
+      tags: [Dealer Notifications]
+      summary: Update notification channel preferences
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NotificationPreferences" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NotificationPreferences" }
+
   # ===================== ADMIN =====================
   /admin/dealerships:
     get:
@@ -801,6 +1283,58 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Dealership" }
+  /admin/dealerships/{dealershipId}/suspend:
+    post:
+      tags: [Admin]
+      summary: Suspend an active dealership
+      description: >
+        Delists the dealership from the marketplace and degrades its resolved
+        entitlement to a suspended baseline (blocks new bookings), while
+        **retaining all its data**. Reversible via a later subscription/approve
+        action. Audited to `admin_action`.
+      parameters: [ { name: dealershipId, in: path, required: true, schema: { type: string } } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, description: "Why the dealership is being suspended; recorded in the admin audit log." }
+      responses:
+        "200":
+          description: Suspended; entitlement degraded
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Dealership" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /admin/dealerships/{dealershipId}/reject:
+    post:
+      tags: [Admin]
+      summary: Reject a pending dealership
+      description: >
+        Rejects a pending onboarding application (the terminal `rejected` state).
+        Audited to `admin_action`.
+      parameters: [ { name: dealershipId, in: path, required: true, schema: { type: string } } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, description: "Why the application is being rejected; recorded in the admin audit log." }
+      responses:
+        "200":
+          description: Rejected
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Dealership" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
   /admin/dealerships/{dealershipId}/commission:
     put:
       tags: [Admin]
@@ -828,6 +1362,107 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/AdminOverview" }
 
+  # ===================== ADMIN — BOOKINGS (platform investigation) =====================
+  /admin/bookings/{bookingId}:
+    get:
+      tags: [Admin Bookings]
+      summary: Platform investigation view of any booking
+      description: >
+        Cross-tenant read for the platform team (support / ops / finance) — any
+        booking regardless of dealership. Read-only. Access is role-gated and
+        audited to `admin_action`.
+      parameters: [ { name: bookingId, in: path, required: true, schema: { type: string } } ]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BookingDetail" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/bookings/{bookingId}/refund:
+    post:
+      tags: [Admin Bookings]
+      summary: Platform-initiated refund
+      description: >
+        A refund initiated by the platform team (e.g. dispute resolution). Records
+        an append-only `ledger_entry`, issues the refund via Moyasar, and writes an
+        `admin_action` audit row. **Idempotent** — accepts an `Idempotency-Key`
+        header; a replay returns the original result and never double-refunds. The
+        amount is integer halalas and may not exceed the booking's refundable
+        balance. Sensitive action → requires admin step-up re-authentication (see
+        [security.md](../architecture/security.md)).
+      parameters: [ { name: bookingId, in: path, required: true, schema: { type: string } } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount, reason]
+              properties:
+                amount: { type: integer, description: "Refund amount in halalas; must not exceed the booking's refundable balance." }
+                reason: { type: string, description: "Why the refund is issued; recorded in the admin audit log." }
+      responses:
+        "200":
+          description: Refund recorded and issued
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Payment" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Refund exceeds refundable balance, or the booking is not refundable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  # ===================== ADMIN — PLANS / SUBSCRIPTION / ENTITLEMENT =====================
+  /admin/plans:
+    get:
+      tags: [Admin Plans]
+      summary: The package/tier catalog
+      description: The platform plan catalog (package × tier → enabled modules, limits, commission rate). Assigned to dealerships via the subscription endpoint.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Plan" } }
+  /admin/dealerships/{dealershipId}/subscription:
+    put:
+      tags: [Admin Plans]
+      summary: Assign / change a dealership's package + tier
+      description: Sets the dealership's active subscription (one active per dealership) and recomputes its resolved entitlement.
+      parameters: [ { name: dealershipId, in: path, required: true, schema: { type: string } } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [plan_id]
+              properties:
+                plan_id: { type: string }
+                overrides: { type: object, additionalProperties: true, description: "Optional per-dealer module/limit overrides layered on the plan." }
+                effective_from: { type: string, format: date }
+      responses:
+        "200":
+          description: Updated; entitlement recomputed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Subscription" }
+  /admin/dealerships/{dealershipId}/entitlement:
+    get:
+      tags: [Admin Plans]
+      summary: The resolved effective modules/limits for a dealership
+      parameters: [ { name: dealershipId, in: path, required: true, schema: { type: string } } ]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Entitlement" }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -847,6 +1482,11 @@ components:
       schema: { type: integer, default: 20, maximum: 100 }
 
   responses:
+    BadRequest:
+      description: Invalid request (validation error)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
     Unauthorized:
       description: Authentication required or failed
       content:
@@ -896,6 +1536,15 @@ components:
         amount: { type: integer, example: 15000, description: "150.00 SAR" }
         currency: { type: string, example: "SAR" }
 
+    MetaConfig:
+      type: object
+      description: Unauthenticated app version/config gate returned by GET /meta.
+      properties:
+        min_supported_version: { type: string, example: "1.4.0" }
+        latest_version: { type: string, example: "1.7.2" }
+        force_update: { type: boolean }
+        message: { type: string, nullable: true, description: "Optional message to show when an update is required/available." }
+
     AuthTokens:
       type: object
       properties:
@@ -912,6 +1561,12 @@ components:
         phone: { type: string }
         email: { type: string }
         absher_verified: { type: boolean }
+        # KYC — data-entry now; Absher verification wired later (STATUS P-4).
+        # The contract models the captured fields + resulting status only;
+        # id_number / license_no are collected via POST /customer/me/documents
+        # and never returned here (full PII lives encrypted in customer_document).
+        id_type: { type: string, enum: [national_id, iqama], nullable: true }
+        kyc_status: { type: string, enum: [unverified, pending, verified, rejected], default: unverified }
         status: { type: string, enum: [active, blocked] }
     CustomerUpdate:
       type: object
@@ -1036,9 +1691,14 @@ components:
         transmission: { type: string }
         seats: { type: integer }
         image_url: { type: string }
-        daily_amount: { type: integer }
+        daily_amount: { type: integer, description: "Indicative 'from' price/day in halalas (dateless browse); the itemized quote is computed on the listing detail once dates are supplied." }
         distance_km: { type: number }
         rating: { type: number, nullable: true }
+        # Promotions seam — always null in V1. When paid placement ships,
+        # rank_score carries the blended ranking signal and promotion_rank the
+        # sponsored slot; V1 returns organic order and leaves both null.
+        rank_score: { type: number, nullable: true }
+        promotion_rank: { type: integer, nullable: true }
     ListingDetail:
       allOf:
         - $ref: "#/components/schemas/Listing"
@@ -1075,7 +1735,11 @@ components:
       type: object
       properties:
         id: { type: string }
-        status: { type: string, enum: [pending, confirmed, active, completed, cancelled, no_show] }
+        # Lifecycle enum only. confirmation_failed = the booking-confirm saga
+        # (pay → Tajeer register) could not complete and was compensated.
+        # Saga sub-states (pending_contract, settlement_pending) live in
+        # booking_saga_state, never here — see data-model.md §4.8/§7.5.
+        status: { type: string, enum: [pending, confirmed, active, completed, cancelled, no_show, confirmation_failed] }
         customer_id: { type: string }
         vehicle_id: { type: string }
         pickup_branch_id: { type: string }
@@ -1086,7 +1750,10 @@ components:
         deposit_amount: { type: integer }
         vat_amount: { type: integer }
         total_amount: { type: integer }
-        channel: { type: string, enum: [marketplace, dealer_direct] }
+        # Commission accrues only on channel = marketplace.
+        channel: { type: string, enum: [marketplace, dealer_direct, walk_in, external_aggregator] }
+        channel_source: { type: string, nullable: true, description: "Free-text origin for external_aggregator bookings (which aggregator); required when channel = external_aggregator." }
+        source: { type: string, enum: [live, imported], default: live }
         created_at: { type: string, format: date-time }
     BookingDetail:
       allOf:
@@ -1153,12 +1820,15 @@ components:
         id: { type: string }
         invoice_number: { type: string }
         type: { type: string, enum: [simplified, standard] }
+        direction: { type: string, enum: [dealer_to_customer, platform_to_dealer], default: dealer_to_customer }
         subtotal_amount: { type: integer }
         vat_amount: { type: integer }
         total_amount: { type: integer }
         zatca_uuid: { type: string, nullable: true }
         qr_payload: { type: string, nullable: true }
         clearance_status: { type: string, enum: [pending, cleared, reported, failed] }
+        # source = imported ⇒ already filed with ZATCA; never re-cleared.
+        source: { type: string, enum: [live, imported], default: live }
         issued_at: { type: string, format: date-time }
 
     MaintenanceSchedule:
@@ -1322,47 +1992,183 @@ components:
         commission_month: { type: integer }
         top_cities: { type: array, items: { type: object, properties: { city: {type: string}, bookings: {type: integer} } } }
 
-# =====================================================================
-# V1 RE-SCOPE ADDITIONS (2026-06) — paths/schemas to be expanded here.
-# Human-readable detail in 04_Miqwad_API_Reference.md; conventions in
-# 17_Miqwad_Error_Catalog_API_Conventions.md. Decisions in 21 (ADR).
-#
-# New tags above are served by these endpoints (all dealer endpoints are
-# entitlement-gated: 403 entitlement_module_disabled / 402 entitlement_limit_reached):
-#
-#   Bookings (channels):
-#     POST   /dealer/bookings                      # walk_in | dealer_direct | external_aggregator (+channel_source); no commission unless marketplace
-#   Delivery:
-#     GET/POST  /dealer/bookings/{id}/deliveries
-#     PATCH     /dealer/deliveries/{id}
-#   Reviews:
-#     GET    /dealer/reviews
-#     POST   /customer/bookings/{id}/review
-#   Violations (Saher):
-#     GET/POST  /dealer/violations
-#     POST      /dealer/violations/{id}/attribute
-#   Notifications:
-#     GET    /dealer/notifications
-#     GET/PUT /dealer/notification-preferences
-#   Connections (gov credential wizard):
-#     GET    /dealer/connections
-#     POST   /dealer/connections/{system}          # tajeer|zatca|wasl — stored in vault, never returned
-#   Import / migration:
-#     GET    /dealer/imports/templates/{entity}
-#     POST   /dealer/imports
-#     GET    /dealer/imports/{id}
-#     POST   /dealer/imports/{id}/commit           # imported gov docs flagged 'imported', never re-submitted
-#   Subscription / packaging:
-#     GET    /dealer/subscription
-#     GET    /admin/plans
-#     PUT    /admin/dealerships/{id}/subscription
-#     GET    /admin/dealerships/{id}/entitlement
-#
-# New schemas (to add under components.schemas): Plan, Subscription, Entitlement,
-# Delivery, Review, TrafficViolation, ImportBatch, ImportRow, ConnectionStatus,
-# NotificationLog. The Booking schema gains channel ∈ {marketplace,dealer_direct,
-# walk_in,external_aggregator}, channel_source, source ∈ {live,imported}.
-# The Invoice schema gains direction ∈ {dealer_to_customer,platform_to_dealer} and source.
-# Error 'code' enum gains: entitlement_module_disabled, entitlement_package_excluded,
-# entitlement_limit_reached. All money/external POSTs accept Idempotency-Key header.
-# =====================================================================
+    # ===================== V1 RE-SCOPE SCHEMAS (2026-06) =====================
+    # Promoted from the former comment-only block. Enum values match
+    # docs/architecture/data-model.md §4.8/§4.9 and its CREATE TYPE section.
+
+    Feed:
+      type: object
+      description: >
+        Anonymous, dateless discovery payload. Sections reuse the Listing schema;
+        pricing is indicative ("from X/day") until the customer picks dates.
+      properties:
+        sections:
+          type: object
+          properties:
+            near_you: { $ref: "#/components/schemas/FeedSection" }
+            popular: { $ref: "#/components/schemas/FeedSection" }
+            categories: { $ref: "#/components/schemas/FeedSection" }
+            all: { $ref: "#/components/schemas/FeedSection" }
+        next_cursor: { type: string, nullable: true }
+        has_more: { type: boolean }
+    FeedSection:
+      type: object
+      properties:
+        title: { type: string, example: "Near you" }
+        listings: { type: array, items: { $ref: "#/components/schemas/Listing" } }
+
+    Review:
+      type: object
+      properties:
+        id: { type: string }
+        booking_id: { type: string }
+        vehicle_id: { type: string }
+        dealership_id: { type: string }
+        rating: { type: integer, minimum: 1, maximum: 5 }
+        comment: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    Plan:
+      type: object
+      description: A package × tier catalog entry (platform reference data).
+      properties:
+        id: { type: string }
+        package: { type: string, enum: [management, marketplace, both] }
+        tier: { type: string, enum: [free, standard, pro] }
+        price_amount: { type: integer, description: "Plan price in halalas" }
+        enabled_modules: { type: object, additionalProperties: { type: boolean }, description: "Module feature flags" }
+        limits: { type: object, additionalProperties: { type: integer }, description: "Numeric caps (e.g. max vehicles/branches)" }
+        commission_rate_bps: { type: integer, example: 1200, description: "12.00%" }
+
+    Subscription:
+      type: object
+      description: A dealership's active package/tier + its resolved entitlement + billing status.
+      properties:
+        id: { type: string }
+        plan_id: { type: string }
+        package: { type: string, enum: [management, marketplace, both] }
+        tier: { type: string, enum: [free, standard, pro] }
+        status: { type: string, enum: [trialing, active, past_due, suspended, cancelled] }
+        current_period_start: { type: string, format: date, nullable: true }
+        current_period_end: { type: string, format: date, nullable: true }
+        entitlement: { $ref: "#/components/schemas/Entitlement" }
+
+    Entitlement:
+      type: object
+      description: The effective, resolved modules + limits for a dealership (plan + overrides). Enforced server-side (402/403).
+      properties:
+        dealership_id: { type: string }
+        modules: { type: object, additionalProperties: { type: boolean } }
+        limits: { type: object, additionalProperties: { type: integer } }
+        usage: { type: object, additionalProperties: { type: integer }, description: "Current counts against the limits" }
+        computed_at: { type: string, format: date-time }
+
+    Delivery:
+      type: object
+      properties:
+        id: { type: string }
+        booking_id: { type: string }
+        type: { type: string, enum: [delivery, collection] }
+        status: { type: string, enum: [scheduled, en_route, completed, cancelled] }
+        address: { type: string }
+        geo_lat: { type: number }
+        geo_lng: { type: number }
+        window_start: { type: string, format: date-time }
+        window_end: { type: string, format: date-time }
+        fee_amount: { type: integer, description: "Delivery fee in halalas" }
+        assigned_staff_id: { type: string, nullable: true }
+    DeliveryInput:
+      type: object
+      required: [type, address]
+      properties:
+        type: { type: string, enum: [delivery, collection] }
+        address: { type: string }
+        geo_lat: { type: number }
+        geo_lng: { type: number }
+        window_start: { type: string, format: date-time }
+        window_end: { type: string, format: date-time }
+        fee_amount: { type: integer }
+
+    ConnectionStatus:
+      type: object
+      description: Government-system connection state. Credentials are never returned — status only.
+      properties:
+        system: { type: string, enum: [tajeer, zatca, wasl] }
+        status: { type: string, enum: [not_connected, connected, expired, error] }
+        connected_at: { type: string, format: date-time, nullable: true }
+        expires_at: { type: string, format: date-time, nullable: true }
+        last_checked_at: { type: string, format: date-time, nullable: true }
+        message: { type: string, nullable: true, description: "Human-readable status detail (e.g. why an attempt failed). Never contains credentials." }
+
+    ImportBatch:
+      type: object
+      properties:
+        id: { type: string }
+        entity: { type: string, enum: [vehicle, customer, booking, contract, invoice, maintenance] }
+        status: { type: string, enum: [uploaded, validating, validated, importing, completed, failed] }
+        total_rows: { type: integer }
+        ok_rows: { type: integer }
+        quarantined_rows: { type: integer }
+        created_at: { type: string, format: date-time }
+        committed_at: { type: string, format: date-time, nullable: true }
+    ImportRow:
+      type: object
+      properties:
+        id: { type: string }
+        row_number: { type: integer }
+        status: { type: string, enum: [pending, imported, quarantined] }
+        errors: { type: array, items: { type: string }, description: "Per-row validation errors when quarantined" }
+        data: { type: object, additionalProperties: true, description: "The parsed source row" }
+
+    TrafficViolation:
+      type: object
+      description: Saher fine passthrough recorded against a rental window.
+      properties:
+        id: { type: string }
+        vehicle_id: { type: string }
+        booking_id: { type: string, nullable: true }
+        violation_ref: { type: string, description: "Saher/MoI reference number" }
+        violation_at: { type: string, format: date-time }
+        amount: { type: integer, description: "Fine amount in halalas" }
+        status: { type: string, enum: [recorded, attributed, charged, disputed] }
+        attributed_customer_id: { type: string, nullable: true }
+        notes: { type: string, nullable: true }
+    TrafficViolationInput:
+      type: object
+      required: [vehicle_id, violation_ref, violation_at, amount]
+      properties:
+        vehicle_id: { type: string }
+        booking_id: { type: string }
+        violation_ref: { type: string }
+        violation_at: { type: string, format: date-time }
+        amount: { type: integer }
+        notes: { type: string }
+
+    NotificationLog:
+      type: object
+      description: A record of a sent notification (communications history).
+      properties:
+        id: { type: string }
+        channel: { type: string, enum: [push, sms, email, in_app] }
+        template: { type: string, description: "Template key (server-localized)" }
+        recipient: { type: string, description: "Masked recipient (phone/email)" }
+        booking_id: { type: string, nullable: true }
+        status: { type: string, enum: [queued, sent, delivered, failed] }
+        sent_at: { type: string, format: date-time, nullable: true }
+    NotificationPreferences:
+      type: object
+      description: Per-dealer channel preferences (which event types go to which channels).
+      properties:
+        channels:
+          type: object
+          properties:
+            push: { type: boolean }
+            sms: { type: boolean }
+            email: { type: boolean }
+            in_app: { type: boolean }
+        events:
+          type: object
+          additionalProperties:
+            type: array
+            items: { type: string, enum: [push, sms, email, in_app] }
+          description: "Map of event key → enabled channels (e.g. booking_confirmed: [push, email])"

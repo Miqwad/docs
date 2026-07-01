@@ -27,8 +27,10 @@ Architecture Decision Records for Miqwad live in [adr-log.md](adr-log.md). Exter
 | [014](adr-log.md#adr-014--zatca-phase-2-wrap-the-official-sdk) | ZATCA Phase 2: wrap the official SDK | Accepted |
 | [015](adr-log.md#adr-015--payments-moyasar) | Payments: Moyasar | Accepted |
 | [016](adr-log.md#adr-016--api-surface-hand-written-rest-v1-for-the-domain--elide-jsonapi-for-crud) | API: REST `/v1` + Elide JSON:API for CRUD | Accepted |
-| [021](adr-log.md#adr-021--auth) | Auth (provider 🔵 Open: Keycloak vs GCIP) | Open |
-| [022](adr-log.md#adr-022--frontend-react-native-expo-customer-app-web-portals-shared-design-system) | Frontend (web framework 🔵 Open) | Accepted |
+| [021](adr-log.md#adr-021--auth) | Auth: self-hosted Keycloak (me-central2) | Accepted* |
+| [022](adr-log.md#adr-022--frontend-react-native-expo-customer-app-web-portals-shared-design-system) | Frontend: Expo app + React (Vite) SPA portals + Next.js public surface | Accepted |
+
+\* ADR-021 is **Accepted — pending final CNTXT residency confirmation** (2026-07-01); Keycloak is the working default regardless of that reply.
 
 ## How this set was curated (from the pre-build draft log of 23)
 

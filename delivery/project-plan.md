@@ -8,7 +8,9 @@ Ship the full V1 — rental operating system **and** customer marketplace — in
 
 ## Goal & stack
 
-V1 is the complete platform: the rental OS, the customer marketplace, all four Saudi government integrations, packaging/entitlements, multi-channel bookings, and full historical migration. Nothing is cut from V1; what is deferred to V2 is already decided — see [backlog.md](backlog.md).
+V1 is the complete platform: the rental OS, the customer marketplace, the customer discovery feed + KYC, all four Saudi government integrations, packaging/entitlements, multi-channel bookings, an informal launch landing site, and full historical migration. Nothing is cut from V1; what is deferred to V1.5/V2 is already decided — see [backlog.md](backlog.md).
+
+**Time is not the V1 constraint.** This is an AI-assisted small team (Claude Pro Max), so capacity is not the gate — full scope stays and we **rebalance/sequence** it across the plan rather than cut it. The timeline below is a sequencing guide, not a headcount-limited budget; we build for the long run.
 
 | Layer | Stack |
 |---|---|
@@ -16,22 +18,25 @@ V1 is the complete platform: the rental OS, the customer marketplace, all four S
 | API | Hand-built domain (Spring MVC) + Elide JSON:API for CRUD, both under `/v1` |
 | Data | PostgreSQL (Cloud SQL · PostGIS · pg_partman) + Redis (Memorystore) |
 | Jobs | JobRunr (Postgres-backed) + transactional outbox |
-| Frontend | React Native (Expo) customer app · React dealer + admin portals |
-| Payments | Moyasar |
+| Auth | Keycloak (self-hosted, me-central2) — staff/platform; customer phone-OTP *(O-2 resolved)* |
+| Frontend | React Native (Expo) customer app · React (Vite) SPA dealer + admin portals · Next.js public/SEO landing site *(O-1 resolved)* |
+| Payments | Moyasar — deposit **charged up front** (no auth-hold) |
 | Cloud | GCP me-central2 (Dammam) |
 
 ## The team — 3 engineers + a business owner
 
-**2 backend + 1 frontend engineer, plus the MBA/business owner. No dedicated UI/UX designer, QA, or DevOps:** the frontend engineer absorbs UI (an **off-the-shelf component library**, not a bespoke design system), the Senior BE owns CI/CD + infra, everyone runs TDD, and the MBA runs UAT + the legal/credentials critical path. The backend is split cleanly so the two BE engineers rarely block each other.
+**2 backend + 1 frontend engineer, plus the MBA/business owner. No dedicated UI/UX designer, QA, or DevOps:** the frontend engineer owns UI on an **off-the-shelf component library** (not a bespoke design system), the Senior BE owns CI/CD + infra, everyone runs TDD, and the MBA runs UAT + the legal/credentials critical path. The backend is split cleanly so the two BE engineers rarely block each other. **This is an AI-assisted team, so the plan sequences the full scope across the timeline rather than trimming it to fit headcount** — front-loading the UI kit and generating the typed client so the single FE builder streams work steadily from W1 instead of piling it into the final weeks.
 
 | Role | Focus |
 |---|---|
 | **Senior Backend** | Infra + CI/CD + GCP + **tenancy, money/ledger, sagas, perf & security pass**; reviewer/depth partner |
 | **Mid Backend** | **Deep domain owner** (design author): crown-jewels (availability, booking, ZATCA/Tajeer) + breadth (fleet, marketplace, ops) + export pipeline |
-| **Frontend** | All three surfaces — customer RN app + dealer + admin web — on an **off-the-shelf component library** + minimal brand tokens, driven by the typed OpenAPI client; bespoke design system deferred |
-| **MBA / business** | Legal + **government-credentials critical path** + packaging/pricing + pilot onboarding + PM/UAT |
+| **Frontend** | All three app surfaces — customer RN app (incl. discovery feed + KYC) + dealer + admin web — on an **off-the-shelf component library** + minimal brand tokens, driven by the typed OpenAPI client; bespoke design system deferred. Light-touch support on the landing site |
+| **MBA / business** | Legal + **government-credentials critical path** + packaging/pricing + pilot onboarding + PM/UAT + **owns the launch landing-site content/marketing** |
 
 Per-person week-by-week plans are in [team/](team/) (indexed from [roles.md](roles.md)). **Backend split:** Senior BE = the cross-cutting/infra/money/saga spine; Mid BE = the domain depth + breadth. They pair only on the sagas and the money/billing ledger.
+
+**Landing site (launch deliverable).** A small, informal marketing site — what Miqwad is, both sides of the platform (dealer OS + customer marketplace), and the offering — ships for launch as a simple static/Next.js site. **Content/marketing owned by the MBA**, with **light FE support** for build/deploy; it reuses the brand tokens but is intentionally lightweight. A fuller customer *web* app comes later (V1.5+); the landing site is not that app.
 
 ---
 
@@ -65,9 +70,9 @@ Build outward from the core in strict dependency order. Sprints map onto these l
 | **L6** Money core | payment + deposit + append-only ledger | S3 |
 | **L7** Compliance core + sagas | Tajeer + ZATCA, booking-confirm + return-settle sagas, outbox/JobRunr, idempotency, compensation | S3 |
 | **L8** Trust core | handover/return inspections + geotagged photos + damage | S4 |
-| **L9** Marketplace & channels | full search/listing/filters/map, external-aggregator + walk-in, `marketplace_compliance` flag | S5 |
-| **L10** Fleet ops & finance | telemetry + Wasl + live map, maintenance, delivery, one-way, settlement/commission + subscription billing + platform ZATCA invoice | S5 |
-| **L11** Breadth & onboarding | import/migration (full historical), reports + exports, notifications, reviews, Saher, branch perms + consolidated reporting, admin KPIs, connection wizard | S6 |
+| **L9** Marketplace & channels | full search/listing/filters, **customer discovery feed + anonymous/dateless search**, **KYC/license capture**, external-aggregator + walk-in, `marketplace_compliance` flag | S5 |
+| **L10** Fleet ops & finance | **Wasl compliance reporting** (telemetry ingest → Wasl shape; **live operator map / geofencing → V1.5**), maintenance, delivery, one-way, settlement/commission + subscription billing + platform ZATCA invoice | S5 |
+| **L11** Breadth & onboarding | reports + exports, notifications, reviews, Saher, branch perms + consolidated reporting, admin KPIs, connection wizard, admin dealership suspend/reject + audit trail; **import/migration: active data first, full historical sequenced last** | S6 |
 | **L12** Hardening & launch | security pass, perf/load/soak to the SLOs, DR drill, pilot | S6 |
 
 ## 3. Sprints & milestones
@@ -78,8 +83,8 @@ Build outward from the core in strict dependency order. Sprints map onto these l
 | **S2** | L4–L5 | Availability + booking core across channels |
 | **S3** | L6–L7 | 🔵 **M2 — Booking loop e2e:** reserve → pay (Moyasar sandbox) → confirm → Tajeer (sandbox), with payment-ok/Tajeer-fail auto-refund |
 | **S4** | L8 | Full lifecycle: handover → return inspections + damage |
-| **S5** | L9–L10 | 🔵 **M3 — Ops + monetization:** marketplace + channels live; settlement/commission + subscription billing produce a platform ZATCA invoice |
-| **S6** | L11–L12 | 🔵 **M4 — Pilot-ready:** breadth + migration + hardening; a pilot dealer completes a real rental staging → prod on its chosen package + compliance mode |
+| **S5** | L9–L10 | 🔵 **M3 — Ops + monetization:** marketplace + discovery feed + KYC + channels live; Wasl compliance reporting; settlement/commission + subscription billing produce a platform ZATCA invoice |
+| **S6** | L11–L12 | 🔵 **M4 — Pilot-ready:** breadth + admin controls + hardening + landing site; historical migration run last; a pilot dealer completes a real rental staging → prod on its chosen package + compliance mode |
 
 **Continuous through every sprint:** TDD + Testcontainers + WireMock; the two-saga e2e from S3 on; weekly demo to the MBA + pilot dealer; the priority-order checkpoint that protects the demo.
 
@@ -87,13 +92,14 @@ Build outward from the core in strict dependency order. Sprints map onto these l
 
 | Risk | Mitigation |
 |---|---|
-| **Full V1 in 3 months with only 3 engineers** (largest risk; accepted) | Flexible prep absorbs credentials + scaffolding; libraries delete work (JobRunr, pg_partman, PostGIS, Togglz); **core-first sequencing** (booking loop live by S3/W6); weekly priority-order checkpoint |
-| **One frontend engineer for three surfaces, no designer** (now the #1 capacity risk; accepted) | Build on an **off-the-shelf component library** (no bespoke design-system work) + minimal brand tokens; **thin admin**; **dealer-OS surfaces first**; ruthless reuse; the typed API client is generated from OpenAPI so the FE never blocks on contracts. **Design-system polish is the explicit sacrifice, deferred to post-V1** — feature scope is kept. |
-| **Full historical migration** (compliance-sensitive) | Validate + quarantine; **imported gov docs never re-submitted**; cutover runbook; MBA dry-runs real data by W8 |
+| **Full V1 scope is large** (sequencing challenge, not a capacity cut — time is not the constraint on an AI-assisted team) | Full scope stays; we **rebalance across the timeline** instead of trimming. Flexible prep absorbs credentials + scaffolding; libraries delete work (JobRunr, pg_partman, PostGIS, Togglz); **core-first sequencing** (booking loop live by S3/W6); weekly priority-order checkpoint |
+| **One frontend engineer for three app surfaces + feed/KYC + landing site, no designer** | Not framed as a capacity ceiling: the FE stream is **sequenced from W1 across the whole plan** (not piled into the final weeks), on an **off-the-shelf component library** + minimal brand tokens, with a **thin admin**, **dealer-OS surfaces first**, ruthless reuse, and the typed OpenAPI client so the FE never blocks on contracts. The landing site is **MBA-owned content with light FE support**. Bespoke design-system polish is deferred to post-V1; **full feature scope is kept.** |
+| **Full historical migration** (compliance-sensitive) | **Sequenced last** (active data first, history after go-live-critical paths); validate + quarantine; **imported gov docs never re-submitted**; cutover runbook; MBA dry-runs real data by W8 |
+| **Live fleet tracking depth** (operator live-map / geofencing) | **Deferred to V1.5** to keep V1 focused; **Wasl compliance reporting stays in V1** (telemetry ingest → Wasl shape). *Flag: pending confirmation that all pilot dealers actually use Wasl.* |
 | **Gov-credential + GCP/CNTXT lead times** | MBA starts week 0; build vs WireMock; Togglz-gate per dealer |
 | **Entitlement gating is cross-cutting** | Built in prep/S1, before breadth |
 | **Spring Boot 4 newness / Elide lag** | O9 confirmed core deps; Elide → Spring Data REST fallback; Resilience4j → Spring 7 core; Togglz → own flag table |
-| **Performance must never fall behind** | Enforced SLOs with CI perf-gates + continuous monitoring + load/soak before the first big dealer |
+| **Performance must never fall behind** | Enforced SLOs with CI perf-gates + **distributed tracing from the start** + continuous monitoring + load/soak before the first big dealer |
 | **No QA/DevOps role** | Senior BE owns CI/CD; TDD + Testcontainers + the two-saga/entitlement/channel/import e2e tests; MBA runs UAT |
 
 ## 5. Open items
@@ -105,3 +111,5 @@ Build outward from the core in strict dependency order. Sprints map onto these l
 | **O10** — residency vs DR: verify a second in-KSA GCP region for cross-region DR; if none, V1 DR = me-central2 multi-zone HA + PITR + tested restore + in-Kingdom backup | 🔵 Open | MBA + Senior BE |
 
 ✅ **Resolved/closed:** O1 (scheduling), O2 (export pipeline → Mid BE), O3 (no contract FE), O4 (legal Path A), O6 (`marketplace_compliance`), O7 (Elide adopted), O9 (Boot 4 confirmed).
+
+Also resolved (STATUS/ADR open items, distinct from the plan's O1–O10 above): **O-1 — frontend framework** (ADR-022: React (Vite) SPA for authenticated dealer/admin portals + **Next.js** for the public/SEO landing site now, customer web app later); **O-2 — auth provider** (ADR-021: self-hosted **Keycloak** in me-central2, customer phone-OTP). Both are settled and reflected in the stack table above.

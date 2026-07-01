@@ -4,20 +4,39 @@ The single register of everything in these docs that is **not settled**. The bac
 
 **Legend:** 🔵 **Open** = a decision not yet made · 🟡 **Provisional** = approach set, detail pending an external input · 🟣 **Follow-up** = decided, but needs an external verification before scaffolding.
 
-_Last updated: 2026-06-30._
+_Last updated: 2026-07-01._
 
 > **2026-06-30 milestone — the backend walking skeleton is built and pushed** ([github.com/Miqwad/backend](https://github.com/Miqwad/backend)): a Kotlin 2.3 / Spring Boot 4.1 / JDK 25 Spring Modulith monolith with the cross-cutting kernel + 24 bounded-context modules + a `fleet` vertical slice. Flyway **V1–V6** apply, `/actuator/health` is green, the **non-negotiable cross-tenant RLS isolation test passes** (repo + native SQL → zero rows), the ZATCA SDK signs on JDK 25, and **CI is green**. The whole build runs on JDK 25. The physical DB schema is therefore done; the prioritized build backlog remains the open pre-build deliverable.
 
-> **Team capacity (current): 3 engineers (2 backend + 1 frontend) + a business/MBA owner; no dedicated UI/UX designer.** V1 keeps **full scope on the 3-month target** (accepted as the top delivery risk — see [delivery/project-plan.md](delivery/project-plan.md)). The backend is split: **Senior BE** owns infra/CI-CD, tenancy, money, sagas, perf/security; **Mid BE** owns the deep domain (crown jewels) + breadth. With **one frontend engineer and no designer**, all surfaces (customer app + dealer/admin web) are built **functionally on an off-the-shelf component library** (+ minimal brand tokens from the brand doc), **not** a bespoke design system — the **Storybook / Style-Dictionary design system is the explicit sacrifice (deferred), not the app or its features**. Dealer-OS surfaces lead the build order; the **OpenAPI contract** ([api/openapi.yaml](api/openapi.yaml)) is the frontend's stable seam. **O-1** (web-portal framework) stays open but low-stakes given the utilitarian UI; **ADR-022** is unchanged in scope, only its design-system depth is deferred.
+> **Team capacity (current): 3 engineers (2 backend + 1 frontend) + a business/MBA owner; no dedicated UI/UX designer.** V1 keeps **full scope on the 3-month target** (accepted as the top delivery risk — see [delivery/project-plan.md](delivery/project-plan.md)). The backend is split: **Senior BE** owns infra/CI-CD, tenancy, money, sagas, perf/security; **Mid BE** owns the deep domain (crown jewels) + breadth. With **one frontend engineer and no designer**, all surfaces (customer app + dealer/admin web) are built **functionally on an off-the-shelf RTL component kit themed with brand tokens** (from the brand doc), **not** a bespoke design system — the **Storybook / Style-Dictionary design system is the explicit sacrifice (deferred post-V1), not the app or its features**. Dealer-OS surfaces lead the build order; the **OpenAPI contract** ([api/openapi.yaml](api/openapi.yaml)) is the frontend's stable seam. **O-1 is now resolved** (2026-07-01): **React (Vite) SPA for the authenticated dealer/admin portals, Next.js confined to the thin public/SEO surface, Expo for the customer app** — see the audit dispositions below and **ADR-022**.
 
 ---
 
-## 🔵 Open decisions (no answer yet — do not assume one)
+## ✅ Formerly-open decisions — now resolved (2026-07-01)
 
-| # | Decision | Why open | Decision criteria / next step | Appears in |
-|---|---|---|---|---|
-| O-1 | **Web-portal framework: React (SPA) vs Next.js** | Customer app (React Native/Expo) is decided; the dealer + admin **web** portals are not. SSR/SEO needs for any public dealer pages vs SPA simplicity is unresolved. | **Low-stakes given the utilitarian, off-the-shelf-component UI** (no designer — see the Team-capacity note). The dealer/admin portals are built in V1 as authenticated app-shells → **React SPA is the simpler default** unless a public dealer page needs SSR/SEO (then Next.js). Make the call before the FE shells (prep/S1); don't over-invest. | [design/frontend-design-system.md](design/frontend-design-system.md), [decisions/adr-log.md](decisions/adr-log.md) (ADR-022) |
-| O-2 | **Auth identity provider: Keycloak vs GCIP** (no hybrid) | We host on GCP me-central2; GCIP (managed — native phone-OTP, SMS MFA, multi-tenancy) is a real alternative to self-hosted Keycloak. The auth *requirements* are decided; the *provider* is not. | Decisive: confirm GCIP stores identity PII **in-Kingdom** (me-central2, via CNTXT) — Keycloak self-hosted guarantees it. Then weigh RBAC depth (Keycloak turnkey vs GCIP app-side) + managed-vs-self-host/cost. Decide before auth scaffolding (S1). | [decisions/adr-log.md](decisions/adr-log.md) (ADR-021), [architecture/security.md](architecture/security.md) |
+Both remaining 🔵 Open decisions are settled. No open decisions remain.
+
+| # | Decision | Resolution | Appears in |
+|---|---|---|---|
+| O-1 ✅ | **Web-portal framework: React (SPA) vs Next.js** | **Resolved 2026-07-01 → both, split by surface:** **React (Vite) SPA** for the authenticated dealer & admin portals (behind login, no SEO need); **Next.js only for the thin public/SEO surface** (an informal landing site now, a customer web app later); **React Native/Expo** for the customer app. | [design/frontend-design-system.md](design/frontend-design-system.md), [decisions/adr-log.md](decisions/adr-log.md) (ADR-022) |
+| O-2 ✅ | **Auth identity provider: Keycloak vs GCIP** (no hybrid) | **Resolved 2026-07-01 → self-hosted Keycloak in me-central2.** GCIP is **not fully in-Kingdom**, which fails PDPL identity-PII residency; Keycloak self-hosted keeps it in-Kingdom and ships turnkey RBAC. Status: **Accepted — pending final CNTXT residency confirmation** (CNTXT messaged 2026-07-01; Keycloak is the working default regardless of the reply). | [decisions/adr-log.md](decisions/adr-log.md) (ADR-021), [architecture/security.md](architecture/security.md) |
+
+---
+
+## Audit dispositions (2026-07-01)
+
+Decisions closed out in the 2026-07-01 audit pass, kept tight (each already reflected in its owning doc / ADR):
+
+- **Customer acquisition (web):** an **informal landing site now**; a full customer *web* app comes later (built on Next.js when warranted) — not V1 scope.
+- **KYC:** customers **enter their ID / driving-licence fields** at booking now; **Absher verification is wired when its API docs arrive** (P-4) — no hard identity gate blocks V1.
+- **Dealer onboarding:** a **self-service onboarding wizard**, with a **support-assisted fallback** for dealers who need it.
+- **Live fleet tracking:** the real-time fleet map / live-position UI moves to **V1.5** (Wasl telemetry ingest + PostGIS position are still built in V1; the live consumer surface is deferred).
+- **Reservation payment-hold:** a **short (~10 min) hold** on a reservation before payment, swept by a **reaper** job (JobRunr) that releases the availability block on expiry.
+- **Historical import:** **stays in V1** but **sequenced last** — active/live data first, historical backfill after the live paths are proven.
+- **Distributed tracing:** **stays in V1** (not deferred).
+- **Wasl usage:** the Wasl integration is **pending confirmation that all dealers actually use it** before it becomes a hard dependency.
+- **Future-proof hooks (build now):** land the low-cost seams during V1 — `vehicle.promotion_rank` (for later marketplace ranking/promotion) and the **hot-path indexes** — so later features don't require a migration on hot tables.
+- **Tenant propagation:** carried via an **enforced coroutine `ThreadContextElement`** (not a raw `ThreadLocal`, and not `ScopedValue` alone) so `dealership_id` survives suspension/thread hops to both Hibernate's `@TenantId` resolver and the per-transaction RLS `SET LOCAL`.
 
 ---
 

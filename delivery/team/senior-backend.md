@@ -6,21 +6,24 @@
 
 ## Prep
 - Scaffold: Spring Modulith on **Kotlin/Boot 4** (Gradle Kotlin DSL, `kotlin-spring`/`kotlin-jpa`/KSP), Flyway baseline + extensions, **CI/CD + GCP staging**, JobRunr/outbox wiring, Detekt/ktlint + ArchUnit.
+- **Distributed tracing from day one** (OpenTelemetry via Micrometer Tracing) wired into the scaffold + CI, so traces exist from the first slice — not retrofitted.
+- **Keycloak** (self-hosted, me-central2) provisioned for staff/platform auth; customer phone-OTP path (*O-2 resolved, ADR-021*).
+- **OpenAPI "contract covers every IA route" CI gate** stub — fails the build when a documented IA route has no OpenAPI operation.
 - Co-author docs **13 / 16 / 17 / 19 / 21 / 25 / 27 / 28**.
 - Co-design tenancy + entitlement with the Mid BE; **Boot-4 dependency check (O9)**; **CNTXT/GCP procurement (O8)** with MBA.
 
 ## Weeks
-- **W1:** **tenancy** — `@TenantId` + RLS + coroutine-safe tenant context (ADR-003) + Keycloak auth + JWT claims (co-own). The **cross-tenant-leak test must pass before feature work**.
-- **W2:** **entitlement enforcement engine** (module/limit/package gates) + branch/staff authz; Moyasar adapter start. → **M1**.
-- **W3:** **payments (Moyasar) + deposit + append-only ledger** (money core).
-- **W4:** **Tajeer adapter** + Spring-7 core resilience + **outbox dispatcher (JobRunr)**.
-- **W5:** **return-settle saga** + compensation (pairs with the Mid BE's booking-confirm saga).
+- **W1:** **tenancy** — `@TenantId` + RLS + coroutine-safe tenant context (ADR-003) + Keycloak auth + JWT claims (co-own) + **RLS auto-enforcement interceptor + ArchUnit rule** (forbids repos/queries that bypass the tenant filter). The **cross-tenant-leak test must pass before feature work**.
+- **W2:** **entitlement enforcement engine** (module/limit/package gates) + branch/staff authz + **admin plan / entitlement / subscription endpoints**; Moyasar adapter start. → **M1**.
+- **W3:** **payments (Moyasar) + deposit (charged up front) + append-only ledger** with the **ledger append-only DB trigger** (no UPDATE/DELETE on ledger rows) + **hot-path indexes** (`branch.city`, `rate_plan(vehicle_id)`, `vehicle(category)`, `booking(customer_id)`).
+- **W4:** **Tajeer adapter** + Spring-7 core resilience + **outbox dispatcher (JobRunr)** + **`booking_saga_state` table** (persisted saga state machine).
+- **W5:** **return-settle saga** + compensation (pairs with the Mid BE's booking-confirm saga) + **~10-min reservation payment-hold + reaper job** (expires unpaid holds, releases the availability block).
 - **W6:** reconciliation jobs + the two-saga e2e harness. → **M2**.
 - **W7:** ZATCA clearance hardening (support Mid BE) + deposit settlement + signed-URL/photo security.
-- **W8:** imported-doc guard (co) + idempotency hardening + webhook signature verification.
-- **W9:** **connection pooling / PgBouncer** (ADR-002) + telemetry storage (native partitions/pg_partman job) + read-replica wiring.
-- **W10:** settlement/billing ledger side + platform ZATCA invoice (co) + Wasl adapter support. → **M3**.
-- **W11:** **security pass** (rate limits, vault, PDPL workflow — doc 27) + free-tier limit enforcement.
-- **W12:** **load test + perf-SLO CI gates (doc 28)** + DR drill (doc 30) + release hardening. → **M4**.
+- **W8:** imported-doc guard (co) + idempotency hardening + **Moyasar webhook signature verification** (verified + processed once).
+- **W9:** **connection pooling / PgBouncer** (ADR-002) + **telemetry ingest storage for Wasl reporting** (native partitions/pg_partman job) *(live operator map / geofencing → V1.5)* + read-replica wiring + index/perf tuning.
+- **W10:** settlement/billing ledger side + platform ZATCA invoice (co) + **Wasl compliance-reporting adapter** support (provider-agnostic shape). → **M3**.
+- **W11:** **security pass** — **app-layer rate limiting (Bucket4j)** on all endpoints, vault, PII, PDPL workflow (doc 27) + free-tier limit enforcement + **`/meta` version-gate endpoint** (min-supported client / forced-update).
+- **W12:** **load test + perf-SLO CI gates (doc 28)** + **OpenAPI contract-coverage CI gate enforced** + DR drill (doc 30) + release hardening. → **M4**.
 
-*Pairs with: Mid BE (sagas, money, billing), Frontend (auth/JWT contract), MBA (credentials, CNTXT). Detail in docs 16/17/19/25/27/28/30.*
+*Pairs with: Mid BE (sagas, money, billing), Frontend (auth/JWT contract, `/meta` gate), MBA (credentials, CNTXT). Detail in docs 16/17/19/25/27/28/30.*

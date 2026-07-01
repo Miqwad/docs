@@ -2,7 +2,7 @@
 
 **System-wide security design: how Miqwad authenticates, authorizes, isolates tenants, guards the government-credential vault (the crown jewel), minimizes PCI scope, and governs data under PDPL.**
 
-Pairs with [reliability-dr.md](reliability-dr.md) (observability/DR) and [fraud-trust-safety.md](fraud-trust-safety.md) (economic/behavioural abuse). Cross-links [ADR-003](../decisions/adr-log.md#adr-003--multi-tenancy-shared-schema--dealership_id--tenantid--rls) (tenancy), [ADR-013](../decisions/adr-log.md#adr-013--feature-flags--entitlements-togglz--an-entitlementsubscription-model) (entitlements), [ADR-021](../decisions/adr-log.md#adr-021--auth-keycloak) (auth). Open/provisional items live in [STATUS.md](../STATUS.md).
+Pairs with [reliability-dr.md](reliability-dr.md) (observability/DR) and [fraud-trust-safety.md](fraud-trust-safety.md) (economic/behavioural abuse). Cross-links [ADR-003](../decisions/adr-log.md#adr-003--multi-tenancy-shared-schema--dealership_id--tenantid--rls) (tenancy), [ADR-013](../decisions/adr-log.md#adr-013--feature-flags--entitlements-togglz--an-entitlementsubscription-model) (entitlements), [ADR-021](../decisions/adr-log.md#adr-021--auth-keycloak) (auth — Keycloak). Open/provisional items live in [STATUS.md](../STATUS.md).
 
 > **Stack context.** Kotlin / JDK 25 / Spring Boot 4 (Spring Security 7), coroutines-first; multi-tenancy via Hibernate `@TenantId` + Postgres RLS; GCP me-central2 (Dammam) for PDPL residency.
 
@@ -20,15 +20,17 @@ Pairs with [reliability-dr.md](reliability-dr.md) (observability/DR) and [fraud-
 
 ## 2. Authentication ✅
 
-Phone-OTP for customers; RBAC + MFA for staff/platform. The **identity provider is 🔵 Open — Keycloak vs GCIP** (the requirements below hold either way; [STATUS O-2](../STATUS.md), [ADR-021](../decisions/adr-log.md#adr-021--auth)).
+Phone-OTP for customers; RBAC + MFA for staff/platform. The **identity provider is Keycloak (self-hosted, me-central2)** — pending final CNTXT residency confirmation ([STATUS O-2](../STATUS.md), [ADR-021](../decisions/adr-log.md#adr-021--auth-keycloak)). GCIP was rejected because it is **not fully in-Kingdom**, which fails PDPL data residency.
 
 | Principal | Mechanism |
 |---|---|
 | **Customers** | Phone + OTP — rate-limited and attempt-capped; short-lived access token + rotating refresh token; refresh-token reuse detection revokes the whole token family. |
-| **Dealer staff & platform users** | The IdP (Keycloak realms or GCIP — O-2) per environment — RBAC, password policy, lockout, and **mandatory MFA for `owner` / `manager` / platform `admin`** roles. |
+| **Dealer staff & platform users** | Keycloak realms per environment — RBAC, password policy, lockout, and **mandatory MFA for `owner` / `manager` / platform `admin`** roles. |
 | **Service-to-service** | Workload Identity (Cloud Run → Google APIs) and Workload Identity Federation (CI → GCP) — **no long-lived key files anywhere**. |
 
 **Tokens.** The JWT carries `sub`, `role`, and `dealership_id`. The API is an OAuth2 resource server; it validates signature, issuer, audience, and expiry on every request. **`dealership_id` is authoritative from the token, never from the request body.**
+
+**Step-up re-authentication on sensitive admin actions.** On top of the mandatory MFA at login, high-impact platform-team (`/admin/*`) mutations require a **fresh step-up re-authentication** (a recent MFA/`amr` assertion within a short validity window) at the moment of the action — the login session alone is not sufficient to authorize them. This applies to **commission changes, platform-initiated refunds, and dealership suspend/reject** (extendable to other destructive platform actions). The step-up is enforced server-side and, like every `/admin/*` write, is recorded in the append-only `admin_action` audit table ([data-model.md](data-model.md)).
 
 ---
 
@@ -87,6 +89,7 @@ Payments run through **Moyasar** ([ADR-015](../decisions/adr-log.md#adr-015--pay
 ## 7. Transport, edge & network security ✅
 
 - **TLS 1.2+ / HSTS** terminated at the Global HTTPS Load Balancer; **Cloud Armor** WAF + IP/rate rules in front of Cloud Run (complements app-layer rate limits).
+- **App-layer rate limiting (V1):** **Bucket4j** (or equivalent) enforces per-principal/per-IP caps inside the app on the abuse-prone endpoints — **OTP request/verify, login/auth, and booking-create** — complementing Cloud Armor's coarse edge limits with fine-grained, business-aware throttling. Exceeding a cap returns `429` and feeds the anomaly alerts.
 - **Security headers** on web surfaces: `Content-Security-Policy` (nonce-based, no `unsafe-inline` scripts), `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy` locking camera/mic/geo by default.
 - **Private east-west:** Cloud SQL / Memorystore reachable only over private IP via the Serverless VPC connector — **no public DB IP**. Egress to government/payment systems via Cloud NAT with a stable, allow-listed egress IP.
 - **VPC Service Controls** perimeter around Cloud SQL, GCS, and Secret Manager to prevent data exfiltration.

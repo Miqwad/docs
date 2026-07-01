@@ -34,7 +34,7 @@ A distinct sub-type, the **rental broker / agent (وسيط تأجير)**, arrang
 
 ### Customer lifecycle
 
-Discover (live availability + all-in price) → Select & quote (itemized) → Verify & book (phone OTP + Absher) → Pay (rental + deposit, both charged up front) → Sign (Tajeer e-contract via Absher) → Receive (pickup/delivery, review handover photos) → Use (drive, extend, manage in-app) → Return (return inspection diffed against handover; deposit refunded, kept against evidenced damage; ZATCA invoice; Tajeer close) → Reflect (rate, rebook).
+Browse (anonymous, dateless in-app Home/Feed) → Discover (search with dates: live availability + all-in price) → Select & quote (itemized) → Verify identity & license (KYC: national ID/iqama + driver's license, before the first booking) → Book (phone OTP) → Pay (rental + deposit, both charged up front) → Sign (Tajeer e-contract via Absher) → Receive (pickup/delivery, review handover photos) → Use (drive, extend, manage in-app) → Return (return inspection diffed against handover; deposit refunded, kept against evidenced damage; ZATCA invoice; Tajeer close) → Reflect (rate — reviews only after `completed` — rebook). A booking may also branch to **cancel / no-show** per the cancellation policy below.
 
 ### The booking state machine
 
@@ -84,12 +84,14 @@ Legally mandatory or operationally non-negotiable. Without all of them, a Saudi 
 - Compliance docs per vehicle: Istimara, insurance + expiry, **Operating Card** + expiry (Tajeer requires a valid card to issue a contract); vehicle photos.
 - Vehicle status lifecycle (available / rented / maintenance / out-of-service / draft) + expiry alerts (insurance, Operating Card, registration).
 
-### Availability, pricing & booking
+### Discovery, availability, pricing & booking
+- **Discovery feed** — an **anonymous, dateless** in-app **Home screen** (a React Native surface in the customer app, **not** a separate web app): featured/nearby cars, categories, dealers, for inspiration and orientation before a date window is chosen. Precedes search in the customer journey (UC-03).
 - **Time-window availability** (available iff no overlapping block) — the rental-specific core, distinct from e-commerce stock.
 - **Database-level double-booking prevention** (exclusion constraint).
 - Rate plans: daily/weekly/monthly, refundable deposit, mileage cap + extra-km, min/max days.
 - Marketplace search (city + date window, all-in price) + **itemized quote** (rental + deposit + VAT + mileage).
 - **Two-phase booking**: reserve (pending) → pay → confirm. Walk-in/dealer-direct entry (no commission). Booking view/cancel/extend.
+- **Ranking is organic in V1** (availability, price, distance, rating). A reserved `vehicle.promotion_rank` seam is carried from day one so **paid placement can be added in V2 with no rework** (see [pricing-packaging.md](pricing-packaging.md)); V1 never reads it for ordering.
 
 ### Saudi regulatory integrations (all mandatory)
 
@@ -102,9 +104,22 @@ Legally mandatory or operationally non-negotiable. Without all of them, a Saudi 
 
 ### Identity, handover & trust
 - Customer phone-OTP auth.
-- Customer KYC: ID/Iqama/GCC-ID/passport + driver's license (valid for the full rental duration — a Tajeer requirement), stored **encrypted and KSA-resident (PDPL)**.
+- **Customer KYC / license capture** — before a customer's **first booking can be confirmed and reach `active`**, they enter identity (**national ID *or* iqama**; GCC-ID/passport also accepted) + **driver's license (number + expiry)**, valid for the full rental duration (a Tajeer requirement), stored **encrypted and KSA-resident (PDPL)**. **V1 is data-entry only**; **Absher verification is wired later** when the API docs arrive — the fields and the hard gate on `active` ship in V1 regardless.
 - **Handover inspection**: odometer, fuel, mandatory **geotagged + timestamped photos** (front/rear/sides/interior/odometer), customer e-acknowledgment.
 - **Return inspection**: same, diffed against handover. Damage records (area, severity, estimate, linked photo). **Tamper-evidence** (hash + timestamp + geotag).
+- **Photo capture is dealer-side.** Inspection photos are captured on the **dealer** app; the **customer app is a photo *viewer* + e-acknowledge only** (it does not capture inspection photos). Location on customer listings is a **static map thumbnail** with a **native-maps deep link** — no interactive in-app map in V1.
+
+### Cancellation, refund & no-show (V1)
+Every booking can branch to `cancelled` or `no_show`; the policy is enforced with proportional commission reversal and availability release (flow in [use-cases.md](use-cases.md) UC-17).
+
+> **PROPOSED — finalized after the dealer-discovery interviews.** Both the *numbers* below **and the ownership model** (platform-wide vs per-dealer) are deferred to post-interview sign-off (P-7…P-12); only the *mechanism* (cancel → refund per policy, proportional commission reversal, availability-block release) is settled for V1.
+> **Interim to build against:** one **platform-wide** policy for **marketplace** bookings (the figures below); dealers' own terms for **dealer-direct / walk-in**; a **per-dealer override seam reserved for V2** (bounded by platform min/max, shown per listing).
+>
+> - **Free cancellation up to 24h before pickup** → **full refund** (rental + deposit).
+> - **Cancellation within 24h of pickup** → **first rental day forfeited**, **deposit refunded**.
+> - **No-show** (customer never arrives, no handover) → **first day + booking fee forfeited**, **deposit refunded**, booking → `no_show`.
+> - **Early return** → **unused days are NOT refunded in V1**.
+> - **Damage on return** → **deducted from the deposit, capped at the deposit amount**; any remainder refunded (damage beyond the deposit is handled out-of-band, not auto-charged in V1).
 
 ### Payments & deposits
 - **Moyasar** gateway: Mada, Visa/Mastercard, Apple Pay, STC Pay. Card data never touches Miqwad servers.
@@ -114,8 +129,11 @@ Legally mandatory or operationally non-negotiable. Without all of them, a Saudi 
 ### Maintenance, tracking & finance
 - Preventive schedules (every N km or N days); **work orders** (open → in-progress → completed, cost, odometer, vendor).
 - A work order **auto-blocks** the vehicle for the service window and recomputes next-due on completion; due-soon/overdue dashboard alerts.
-- **Live fleet map** (position, status, speed, ignition, odometer); provider-agnostic telemetry ingest; trip/route history.
+- **Wasl compliance registration + reporting stays V1** (register passenger rental vehicles + report movements/trips/sensor data to TGA) — *pending confirmation that all dealers use Wasl*. The operator-facing **live fleet map / telemetry visualization / geofencing** (position, status, speed, ignition, odometer; trip/route history) **moves to V1.5** — the regulatory obligation is V1, the internal live-visibility UI is V1.5.
 - ZATCA invoice list with clearance status + QR; **commission only on marketplace bookings** (fairness rule); payout/settlement (gross − commission = net) with reconciliation.
+
+### Dealer dashboard
+- The dealer dashboard is a **"Today / Action Inbox"** — a **prioritized action queue** (pending bookings, handovers/returns due today, expiring docs, maintenance due, Tajeer/ZATCA failures), **not** static counts. It surfaces the next decision and deep-links to the action.
 
 ### Platform admin
 - Dealer approval, commission/SaaS-plan configuration; platform KPIs (active dealers, GMV, commission, top cities).
@@ -129,6 +147,7 @@ Legally mandatory or operationally non-negotiable. Without all of them, a Saudi 
 - Channel on every booking; **external-aggregator manual entry** that blocks availability and runs full compliance; commission accrues only on `marketplace`, reversed proportionally on refund.
 
 ### Data migration
+- **Full historical import stays a V1 MUST, sequenced last** (built after the core operating loop is stable, as the final V1 workstream — not dropped).
 - Full historical import (fleet +docs, customers +KYC, active bookings, historical contracts/invoices/maintenance).
 - Import validation + bad-row quarantine + idempotent re-runs (CSV/Excel templates).
 - Imported historical gov records flagged `imported/historical`, excluded from registration/clearance.
@@ -136,9 +155,19 @@ Legally mandatory or operationally non-negotiable. Without all of them, a Saudi 
 ### Cross-cutting (non-functional)
 - Multi-tenancy with strict per-dealer isolation (token-derived + RLS); Arabic-first, RTL, bilingual AR/EN.
 - PDPL: KSA residency, encryption at rest for PII, access logging. Money as integer halalas. Audit trail on booking/contract/payment/inspection state changes. Mobile apps (iOS + Android) for customers; responsive web for dealers.
+- **Distributed tracing** — request/trace correlation across the modular monolith and the external-integration adapters (Tajeer/ZATCA/Wasl/Moyasar) so a booking or saga can be followed end-to-end.
+- **App-layer rate limiting** — per-endpoint / per-caller limits (OTP requests, search, money- and external-system-touching endpoints) enforced in the application, not only at the edge.
 
 ### Promoted to V1 (scope owned by [backlog](../delivery/backlog.md))
-Notifications (push/SMS/email + log) · customer booking history + downloadable receipts/ZATCA invoices · ratings & reviews · delivery & collection scheduling · one-way rentals · dealer reports & analytics (+ PDF/Excel) · branch-level permissions + consolidated reporting · **Saher** traffic-violation passthrough · dealer self-service Tajeer/ZATCA/Wasl connection wizard.
+Notifications (push/SMS/email + log) · customer booking history + downloadable receipts/ZATCA invoices · ratings & reviews (only after a booking is `completed`) · delivery & collection scheduling · one-way rentals · dealer reports & analytics (+ PDF/Excel) · branch-level permissions + consolidated reporting · **Saher** traffic-violation passthrough · **dealer self-service Tajeer/ZATCA/Wasl connection wizard** (canonical onboarding path; support-assisted fallback).
+
+---
+
+## Deferred to V1.5 🟠
+
+Right-sized out of V1 for sequencing (not capacity), close behind the launch loop:
+
+- **Operator live fleet map / telemetry visualization / geofencing** (position, status, speed, ignition, odometer; trip/route history). **Wasl compliance registration + reporting remains V1** — only the internal live-visibility UI moves here.
 
 ---
 
@@ -171,7 +200,7 @@ No global rental SaaS handles these out of the box. Each is mandatory, credentia
 |---|---|---|---|
 | **Tajeer** | Unified e-rental-contract (required since 2022) | Government API; needs TGA license + active Naql; only the lessor operates the contract | Must V1 |
 | **ZATCA Phase 2** | E-invoicing (signed XML + QR, clearance) | Cryptographic signing, CSID onboarding, ongoing clearance | Must V1 |
-| **Wasl** | Real-time fleet tracking to TGA | Device integration + continuous reporting; confirmed required for rental fleets | Must V1 |
+| **Wasl** | Real-time fleet **compliance** reporting to TGA | Device integration + continuous reporting | **Must V1** (registration + reporting); *pending confirmation all dealers use Wasl*. Operator live-map UI → **V1.5** |
 | **Absher** | Renter identity + e-signature | Integrated into the Tajeer flow | Must V1 |
 | **TGA licensing** | The legal right to operate | Path differs for operator vs broker; prerequisite for Tajeer | Prerequisite |
 

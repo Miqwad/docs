@@ -45,7 +45,7 @@ GPS/OBD devices → HTTPS LB (rate-limited path) → miqwad-api (telemetry inges
 | Cache / queues | **Memorystore for Redis** (HA) | Availability cache, live-vehicle cache, rate-limit buckets. Fallback: Redis on GCE/GKE (F-1). |
 | Object storage | **Cloud Storage** (regional, me-central2) | Private buckets; V4 signed URLs; versioning + lifecycle; CMEK. Photos, docs, imports. |
 | Secrets / keys | **Secret Manager + Cloud KMS (CMEK)** | The dealer Tajeer/ZATCA-CSID vault; envelope encryption for KYC columns. |
-| Identity | **Keycloak** (self-hosted, Cloud Run/GKE) **or GCIP** — 🔵 Open (O-2) | Customer OTP, staff/platform SSO, MFA. Keycloak runs in-region (residency guaranteed); GCIP me-central2 residency pending. |
+| Identity | **Keycloak** (self-hosted, Cloud Run/GKE) — ✅ decided (O-2) | Customer OTP, staff/platform SSO, MFA. Runs in-region (residency guaranteed). GCIP was ruled out (not fully in-Kingdom); CNTXT confirmation pending. |
 | Edge / WAF | **Cloud Load Balancing + Cloud Armor** | TLS, HSTS, WAF rules, IP/rate limiting (complements Bucket4j). |
 | CDN | **Cloud CDN** | Static web + cached public media. |
 | Email / SMS / push | external (FCM, Unifonic SMS, email API) | Behind the notification abstraction. |
@@ -91,7 +91,7 @@ Three **isolated GCP projects** (`miqwad-staging`, `miqwad-prod`, plus `miqwad-s
 
 ## 9. Key data-flow paths ✅
 
-1. **Booking-confirm (saga):** app → LB → `miqwad-api` (reserve → Moyasar hosted payment) → DB commit + `outbox` row → `miqwad-jobs`/JobRunr dispatches Tajeer registration → on success `confirmed`; on Tajeer failure, compensation voids/refunds. Payment webhooks hit `miqwad-api` directly (signature-verified, idempotent).
+1. **Booking-confirm (saga):** app → LB → `miqwad-api` (reserve → Moyasar hosted payment) → DB commit + `outbox` row → `miqwad-jobs`/JobRunr dispatches Tajeer registration → on success `confirmed`; on Tajeer failure, compensation refunds (deposit is charged up front, never held). Payment webhooks hit `miqwad-api` directly (signature-verified, idempotent).
 2. **Telemetry ingest:** device → LB (rate-limited path) → `miqwad-api` (validate/dedup) → partitioned `telemetry_ping` + update `vehicle.live_geo` + Redis `vehicle_live`. Live map reads from Redis; history from partitions (PostGIS).
 3. **Media upload:** app requests a **V4 signed URL** from `miqwad-api` → uploads **directly to GCS** (the API never in the byte path) → metadata row persisted. Inspection photos carry geo/timestamp/hash.
 4. **Reporting:** dealer report → `miqwad-api` queries the **read replica** → renders PDF/Excel; never touches the primary.

@@ -25,7 +25,7 @@ Tenancy stays safe across both: Elide runs over the same Hibernate/JPA layer, so
 |---|---|
 | **Base URL** | `https://api.miqwad.sa/v1` (prod) · `https://staging-api.miqwad.sa/v1` (staging) |
 | **Versioning** | Version in the path (`/v1`). Changes are **additive** within a version (mobile apps can't be force-updated); a breaking change ⇒ `/v2`. |
-| **Auth** | `Authorization: Bearer <JWT>`. The dealer token carries a `dealership_id` claim — **authoritative for tenant scope, never read from the body**. Customers authenticate by phone OTP; staff/platform via the IdP (Keycloak or GCIP — provider is Open, [STATUS O-2](../STATUS.md)). |
+| **Auth** | `Authorization: Bearer <JWT>`. The dealer token carries a `dealership_id` claim — **authoritative for tenant scope, never read from the body**. Customers authenticate by phone OTP; staff/platform via **Keycloak** (self-hosted, me-central2 — O-2 resolved, ADR-021; GCIP ruled out as not fully in-Kingdom, CNTXT confirmation pending). |
 | **Money** | Integer **halalas** (1 SAR = 100 halalas; `15000` = 150.00 SAR) + explicit currency. **Never floats.** |
 | **Timestamps** | RFC3339 UTC (`2026-06-24T09:00:00Z`). |
 | **Pagination (REST)** | Cursor-based: pass `?cursor=` and `?limit=` (max 100); responses include `next_cursor` and `has_more`. |
@@ -104,22 +104,34 @@ The server is authoritative regardless of what the app shows. These are distinct
 
 ---
 
+## Meta (unauthenticated)
+
+| Method | Path | Purpose | Auth |
+|---|---|---|---|
+| GET | `/meta` | App version/config gate called on launch: `{ min_supported_version, latest_version, force_update, message }`. Lets the client force an update before proceeding. | Anonymous |
+
+---
+
 ## Surface 1 — `/customer` (mobile app)
 
 The consumer marketplace: phone-OTP auth, search across all dealerships, book, pay, track the rental.
 
-| Method | Path | Purpose |
-|---|---|---|
-| POST | `/customer/auth/request-otp` | Send login code to phone |
-| POST | `/customer/auth/verify-otp` | Verify code → tokens |
-| GET · PATCH | `/customer/me` | Profile |
-| GET | `/customer/search` | **Search available cars** for a date window + city/location; filters: category, price, transmission; sort by price/distance/rating |
-| GET | `/customer/listings/{id}` | Listing detail with a **full itemized quote** (rental + refundable deposit + VAT + mileage policy) |
-| GET · POST | `/customer/bookings` | List my bookings / **create booking** (returns a `payment_intent`) |
-| GET | `/customer/bookings/{id}` | Booking detail incl. contract + handover photos |
-| POST | `/customer/bookings/{id}/confirm-payment` | Finalize after the gateway returns |
-| POST | `/customer/bookings/{id}/cancel` | Cancel |
-| POST | `/customer/bookings/{id}/review` | Rate dealer/vehicle after completion |
+| Method | Path | Purpose | Auth |
+|---|---|---|---|
+| GET | `/customer/feed` | **Anonymous, dateless discovery** home feed: sections (`near_you`, `popular`, `categories`, `all`) of `Listing` cards with indicative "from X/day" pricing. Served from the same Redis marketplace cache path as search — no new cross-tenant join. | Anonymous |
+| POST | `/customer/auth/request-otp` | Send login code to phone | Anonymous |
+| POST | `/customer/auth/verify-otp` | Verify code → tokens | Anonymous |
+| GET · PATCH | `/customer/me` | Profile (now carries `id_type` + `kyc_status`) | Bearer |
+| POST | `/customer/me/documents` | **KYC** — submit `id_type` (national_id/iqama), `id_number`, `license_no`, `license_expiry`; sets `kyc_status`. Data-entry only in V1 (no Absher call yet, STATUS P-4); id/license are write-only, never returned. | Bearer |
+| GET | `/customer/search` | **Search cars** by city/location; filters: category, price, transmission; sort by price/distance/rating/`promoted`. **Anonymous + dateless-capable**: `pickup_at`/`return_at` are optional — supply them for a dated search with itemized quotes, omit for indicative browse. | Anonymous |
+| GET | `/customer/listings/{id}` | Listing detail. With dates → **full itemized quote** (rental + refundable deposit + VAT + mileage policy); without dates → indicative "from" pricing. | Anonymous |
+| GET · POST | `/customer/bookings` | List my bookings / **create booking** (returns a `payment_intent`) | Bearer |
+| GET | `/customer/bookings/{id}` | Booking detail incl. contract + handover photos | Bearer |
+| POST | `/customer/bookings/{id}/confirm-payment` | Finalize after the gateway returns | Bearer |
+| POST | `/customer/bookings/{id}/cancel` | Cancel | Bearer |
+| POST | `/customer/bookings/{id}/review` | Rate dealer/vehicle (rating 1–5 + comment) — **only when the booking is `completed`** (else `409`) | Bearer |
+
+**Anonymous, dateless browse.** `/customer/feed`, `/customer/search`, and `/customer/listings/{id}` require no token, so a first-time user can explore before signing in. Search/listing dates are optional: with `pickup_at`+`return_at` you get availability-filtered results and itemized quotes; without them you get indicative "from X/day" pricing (the quote is computed once dates are chosen). The `sort=promoted` value is reserved for future paid placement — V1 returns organic order and never 4xx on it. `Listing.rank_score` / `Listing.promotion_rank` are the promotion seam and are always `null` in V1.
 
 **Booking creation is two-phase.** `POST /customer/bookings` reserves a *pending* booking and returns a Moyasar `payment_intent` covering rental + deposit, both **charged up front** (the deposit is refunded in full on a clean return — ADR-015); the app completes payment with the gateway SDK, then calls `confirm-payment`. If the window was taken in between, creation returns `409 vehicle_unavailable` — the live-inventory guarantee in action.
 
@@ -232,24 +244,32 @@ Role-gated (`super_admin` / `ops` / `support` / `finance`).
 |---|---|---|
 | GET | `/admin/dealerships` | All dealerships (filter by status) |
 | POST | `/admin/dealerships/{id}/approve` | Approve a pending dealership |
+| POST | `/admin/dealerships/{id}/suspend` | Suspend an active dealership (body: `reason`) — delists + degrades entitlement, keeps data |
+| POST | `/admin/dealerships/{id}/reject` | Reject a pending dealership (body: `reason`) |
 | PUT | `/admin/dealerships/{id}/commission` | Set commission rate + SaaS plan + fees |
 | GET | `/admin/overview` | Platform KPIs: active dealerships, GMV, commission, top cities |
+| GET | `/admin/bookings/{id}` | Platform investigation view of any booking (cross-tenant, read-only) |
+| POST | `/admin/bookings/{id}/refund` | Platform-initiated refund (body: `amount` halalas + `reason`) — idempotent, ledger-recorded, audited |
 | GET | `/admin/plans` | The package/tier catalog |
 | PUT | `/admin/dealerships/{id}/subscription` | Assign/change a dealership's package + tier (recomputes entitlement) |
 | GET | `/admin/dealerships/{id}/entitlement` | The resolved effective modules/limits for a dealership |
+
+The dealership lifecycle is `pending → active → suspended` (+ terminal `rejected`): `approve` promotes `pending → active`, `suspend` takes `active → suspended` (data retained), `reject` takes `pending → rejected`. Every `/admin/*` mutation writes an append-only `admin_action` audit row; sensitive actions (commission change, refund, suspend/reject) additionally require admin **step-up re-authentication** (see [../architecture/security.md](../architecture/security.md)).
 
 ---
 
 ## Booking state machine
 
-The heart of the system. State: `pending → confirmed → active → completed`, with branches to `cancelled` / `no_show`. Hard guards:
+The heart of the system. State: `pending → confirmed → active → completed`, with branches to `cancelled` / `no_show` / `confirmation_failed`. Hard guards:
 
 - **Payment** clears before `confirmed`.
 - **Tajeer** registration (`registered`) before `active`.
 - **Handover inspection** (with mandatory geotagged, timestamped photos) before `active`.
 - **Return inspection + cleared ZATCA invoice** before `completed`.
 
-Commission accrues only on `channel = marketplace` bookings, never `dealer_direct` / `walk_in` / `external_aggregator`.
+`confirmation_failed` is the terminal state when the booking-confirm saga (pay → Tajeer register) cannot complete and is compensated (money is never held against a rental that doesn't legally exist). **Saga sub-states** (`pending_contract`, `settlement_pending`, …) live in `booking_saga_state`, **not** in `Booking.status` — the lifecycle enum stays clean (`pending`, `confirmed`, `active`, `completed`, `cancelled`, `no_show`, `confirmation_failed`).
+
+`Booking.channel` is one of `marketplace` / `dealer_direct` / `walk_in` / `external_aggregator` (+ `channel_source` for external, required); `source` is `live` / `imported`. Commission accrues only on `channel = marketplace`, never `dealer_direct` / `walk_in` / `external_aggregator`. Non-marketplace bookings are created via `POST /dealer/bookings`.
 
 ---
 

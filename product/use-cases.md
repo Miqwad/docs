@@ -15,11 +15,11 @@ Three actor groups: **Customer** (renter), **Dealer staff** (owner/manager/agent
 | Transition | Hard guard |
 |---|---|
 | `pending → confirmed` | **Payment charged up front** (rental + deposit) first |
-| `confirmed → active` | **Tajeer contract `registered`** first, **and** **handover inspection** complete (with mandatory geotagged + timestamped photos) |
+| `confirmed → active` | **Customer KYC complete** (identity + driver's license captured), **Tajeer contract `registered`**, **and** **handover inspection** complete (with mandatory geotagged + timestamped photos) |
 | `active → completed` | **Return inspection** done **and** **ZATCA invoice cleared** first |
-| → `cancelled` / `no_show` | Branch states; trigger compensation (release block, void/refund) |
+| → `cancelled` / `no_show` | Branch states; trigger compensation (release block, refund) |
 
-**Rule:** money is never held against a rental that doesn't legally exist — if Tajeer registration fails after payment, the booking auto-voids/refunds.
+**Rule:** money is never held against a rental that doesn't legally exist — if Tajeer registration fails after payment, the booking auto-refunds (the deposit is charged up front, never held — ADR-015).
 
 ---
 
@@ -40,12 +40,13 @@ All channels write the same `availability_block` (exclusion constraint), so ther
 
 ## Core flows
 
-### UC-01 — Dealer onboarding & branch setup
-**Actor:** Owner · **Trigger:** invited/approved by Miqwad.
-1. Sign in → `POST /dealer/auth/login`; `GET /dealer/me` loads context (shows whether Tajeer + ZATCA are connected).
+### UC-01 — Dealer onboarding, self-service connection & branch setup
+**Actor:** Owner · **Trigger:** approved by Miqwad.
+1. Sign in → `POST /dealer/auth/login`; `GET /dealer/me` loads context (shows whether Tajeer / ZATCA / Wasl are connected — initially **not connected**).
 2. Create branches (multi-branch from day one) → `POST /dealer/branches`.
 3. Invite staff and assign roles (manager, branch agent, accountant).
-4. **Success:** dealership `active`, ≥1 branch, staff invited, dashboard reachable. *(The business manager's pre-work provisions TGA license, Naql/Tajeer, and ZATCA CSID, so onboarding flips those flags to connected.)*
+4. **Self-service connection wizard (canonical path).** The dealer connects their **own** government integrations themselves — a guided wizard walks them through entering/authorizing **Tajeer (Naql)**, **ZATCA (CSID onboarding)**, and **Wasl** credentials → `POST /dealer/connections/{tajeer|zatca|wasl}`. Each connection is validated and flips its flag to `connected`; the wizard shows what's still outstanding. **Support-assisted fallback:** if the dealer gets stuck on a step, Miqwad ops can assist or complete that connection on their behalf — the wizard is the default, hands-on help is the exception, not the rule.
+5. **Success:** dealership `active`, ≥1 branch, staff invited, dashboard reachable, and the dealer is guided toward a fully-connected state. Marketplace listing and Tajeer/ZATCA-bound operations stay flag-gated until the matching connection is live.
 
 ### UC-02 — Add a vehicle to the fleet
 **Actor:** Manager · **Trigger:** new car to list.
@@ -55,14 +56,17 @@ All channels write the same `availability_block` (exclusion constraint), so ther
 4. Optional preventive schedules → `POST /dealer/vehicles/{id}/maintenance-schedules`.
 5. Vehicle flips `draft → available`; appears in marketplace search.
 
-### UC-03 — Customer searches & books
-**Actor:** Customer · **Trigger:** needs a car.
-1. Phone sign-in → `POST /customer/auth/request-otp` → `.../verify-otp`.
-2. City/location + dates → `GET /customer/search`. Results show **only vehicles free for the whole window**, all-in daily price + distance.
-3. Open a car → `GET /customer/listings/{id}?pickup_at&return_at` returns a **fully itemized quote** (rental + deposit + VAT + mileage). No hidden fees.
-4. "Book" → `POST /customer/bookings` creates a **pending** booking + a Moyasar `payment_intent` (rental + deposit, both charged up front).
-5. Pay via Mada/Apple Pay, then `POST /customer/bookings/{id}/confirm-payment`.
-6. **Success:** booking `confirmed`. If the window was taken first, step 4 returns `409 vehicle_unavailable` and the app re-searches.
+### UC-03 — Customer discovers, searches & books
+**Actor:** Customer · **Trigger:** opens the app / needs a car.
+Journey: **Open app → Home/Feed (anonymous) → Search (anonymous, with dates) → Listing/quote (anonymous) → Sign in (phone-OTP, just-in-time at "Book") → KYC (first booking only) → Book → Pay → Confirm.** Browsing needs **no account**; onboarding is deferred to the moment the customer commits to a booking.
+1. **Open the app → Home/Feed. No login.** Land straight on an **in-app Home screen** (React Native, **not** a web app): an **anonymous, dateless** browse of featured/nearby cars, categories, and dealers via `GET /customer/feed` — an **anonymous endpoint** (no bearer token). The goal is inspiration and orientation before committing to a window.
+2. **Search — with dates (still anonymous).** From the feed or the search bar the customer enters city/location + a date window → `GET /customer/search` (anonymous). Results show **only vehicles free for the whole window**, all-in daily price + distance.
+3. Open a car → `GET /customer/listings/{id}?pickup_at&return_at` (anonymous) returns a **fully itemized quote** (rental + deposit + VAT + mileage). No hidden fees. The listing shows a **static map thumbnail** (deep-links to native maps for directions) — no interactive in-app map.
+4. **Sign in — just-in-time.** The customer taps **"Book."** *Only now* does onboarding kick in: if not already signed in, a phone-OTP gate (`POST /customer/auth/request-otp` → `.../verify-otp`) creates or authenticates the account. Everything above needed no account — this is exactly where anonymous browsing meets onboarding.
+5. **Verify identity & license (first booking only).** If the customer has not yet completed KYC, a **"Verify identity & license"** screen collects **national ID *or* iqama** + **driver's license number + expiry** → `POST /customer/me/documents`. Data-entry now; **Absher verification is wired later** when the API docs arrive. This is a **hard prerequisite for reaching `active`** — a booking cannot be handed over without it. Returning verified customers skip this step.
+6. **Book** → `POST /customer/bookings` creates a **pending** booking + a Moyasar `payment_intent` (rental + deposit, both charged up front).
+7. Pay via Mada/Apple Pay, then `POST /customer/bookings/{id}/confirm-payment`.
+8. **Success:** booking `confirmed`. If the window was taken first, step 6 returns `409 vehicle_unavailable` and the app re-searches.
 
 ### UC-04 — Dealer receives & confirms booking (Tajeer)
 **Actor:** Branch agent · **Trigger:** marketplace booking arrives.
@@ -92,14 +96,15 @@ All channels write the same `availability_block` (exclusion constraint), so ther
 
 ### UC-07 — Maintenance scheduling & tracking
 **Actor:** Manager · **Trigger:** schedule comes due, or a repair is needed.
-1. Dashboard flags **due_soon / overdue** (nightly job from odometer + dates) → `GET /dealer/dashboard`.
+1. Dashboard flags **due_soon / overdue** (nightly job from odometer + dates) → `GET /dealer/dashboard`. The dashboard is a **"Today / Action Inbox"** — a **prioritized action queue** (pending bookings to confirm, handovers/returns due today, expiring docs, maintenance due, Tajeer/ZATCA failures to resolve), **not** a wall of static counts. It surfaces what needs a decision *now* and links straight to the action.
 2. Work order → `POST /dealer/work-orders`. **Auto-writes `availability_block (reason=maintenance)`** so the car can't be booked; sets `vehicle.status = maintenance`.
 3. Progress → `PATCH /dealer/work-orders/{id}` (`in_progress → completed`, cost + odometer).
 4. On completion the schedule recomputes `next_due_*`, the block releases, car returns to `available`.
 5. **Success:** preventive maintenance never missed; a car in the shop is never accidentally rented.
 
-### UC-08 — Live fleet tracking
+### UC-08 — Live fleet tracking *(V1.5 — see [requirements.md](requirements.md))*
 **Actor:** Manager · **Trigger:** wants real-time visibility.
+> The operator **live-map / telemetry / geofencing** experience is scheduled for **V1.5**. **Wasl compliance registration + reporting stays in V1** (mandatory to TGA); what moves is the internal live-visibility UI, not the regulatory obligation.
 1. `GET /dealer/tracking/live` renders every vehicle on a map (status, speed, ignition, odometer).
 2. GPS/OBD gateways post → `POST /dealer/tracking/ingest`; current position cached, history retained.
 3. Per car → `GET /dealer/tracking/vehicles/{id}/history` shows trips over a range.
@@ -150,15 +155,22 @@ All channels write the same `availability_block` (exclusion constraint), so ther
 3. **Success:** door-step delivery scheduled and tracked (entitlement-gated to Standard/Pro).
 
 ### UC-15 — Customer reviews after the rental
-**Actor:** Customer · **Trigger:** booking completed.
-1. `POST /customer/bookings/{id}/review` (rating 1–5 + comment).
-2. **Success:** review published; affects listing visibility and ranking.
+**Actor:** Customer · **Trigger:** booking reaches `completed`.
+1. Reviews are **allowed only after a booking is `completed`** — the return inspection is done and the ZATCA invoice cleared. A review endpoint called on any earlier state is rejected. `POST /customer/bookings/{id}/review` (rating 1–5 + comment).
+2. **Success:** review published; affects listing visibility and **organic** ranking (paid placement is a V2 add-on — see [pricing-packaging.md](pricing-packaging.md)).
 
 ### UC-16 — Saher traffic-violation passthrough
 **Actor:** Accountant / Manager · **Trigger:** a Saher fine during a rental window.
 1. Record → `POST /dealer/violations` (ref, amount, occurred_at, vehicle/booking).
 2. Attribute → `POST /dealer/violations/{id}/attribute` → the renter on record.
 3. **Success:** the fine is attributed and visible; charged per policy.
+
+### UC-17 — Customer cancellation, refund & no-show
+**Actor:** Customer (cancel) / System (no-show) · **Trigger:** customer cancels a booking, or fails to show for pickup.
+1. **Cancel** → `POST /customer/bookings/{id}/cancel` (allowed while `pending` or `confirmed`, before handover). The system computes the refund from the **cancellation/refund policy** owned by [requirements.md](requirements.md) — the amount depends on how far ahead of pickup the cancellation lands.
+2. **Compensation runs** — the `availability_block` is released, the deposit charge is **refunded** (full or partial, for the refundable portion), and any accrued marketplace commission is **reversed proportionally** (ledger records the reversal). If a Tajeer contract was already `registered`, it is closed/cancelled; money is never held against a rental that no longer legally exists.
+3. **No-show** — if the customer never arrives and no handover starts, the branch (or a timeout job) marks the booking → `no_show`; the policy's no-show charge applies (first day + booking fee forfeited, deposit refunded — see [requirements.md](requirements.md)) and the block releases.
+4. **Success:** booking → `cancelled` or `no_show`; the customer sees the itemized refund breakdown; the car is freed for other bookings. **Exact refund numbers are the PROPOSED policy in [requirements.md](requirements.md) (pending confirmation).**
 
 ---
 
@@ -176,4 +188,4 @@ UC-07 maintenance  ◀─ keeps cars serviceable ─────────┘
 UC-08 tracking · UC-09 multi-branch · UC-10 payout  (run continuously)
 ```
 
-The demo walks **UC-03 → UC-04 → UC-05 → UC-06** to show the full loop. See [requirements.md](requirements.md) for the requirement set and [pricing-packaging.md](pricing-packaging.md) for packaging/entitlements.
+The demo walks **UC-03 → UC-04 → UC-05 → UC-06** to show the full loop (UC-03 now opens on the discovery feed and captures KYC before the first booking; UC-17 covers cancellation/refund/no-show off the happy path). See [requirements.md](requirements.md) for the requirement set and [pricing-packaging.md](pricing-packaging.md) for packaging/entitlements.

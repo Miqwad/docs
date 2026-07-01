@@ -16,11 +16,11 @@ These hold across every module and are the reason to read more than one doc. Eac
 | 2 | **No double-booking** — a vehicle is available for a window iff no `availability_block` overlaps it | Postgres `EXCLUDE USING gist (vehicle_id WITH =, tstzrange(start_at,end_at) WITH &&)` — DB-level, **all channels** | [ADR-004](../decisions/adr-log.md#adr-004--no-double-booking-via-tstzrange--gist-exclusion-constraint) |
 | 3 | **Money** — integer **halalas** + explicit currency, never floats; every movement is an **append-only ledger** entry, balances derived | `Money` `@JvmInline value class`; immutable `ledger_entry` | [ADR-005](../decisions/adr-log.md#adr-005--money-as-integer-halalas--append-only-ledger) |
 | 4 | **Keys & schema** — UUIDv7 PKs (UUIDv4 only for public URLs); **Flyway owns the schema** | App-generated UUIDv7; Hibernate auto-DDL off outside local dev | [ADR-006](../decisions/adr-log.md#adr-006--schema--key-conventions-uuidv7-keys-flyway-owns-the-schema) |
-| 5 | **Sagas & compensation** — booking-confirm and return-settle are persisted state machines + transactional outbox; compensation (void/release/refund) is first-class | `outbox` table is source of truth; JobRunr dispatches | [ADR-008](../decisions/adr-log.md#adr-008--sagas-via-persisted-state-machine--transactional-outbox-dispatched-by-jobrunr) · [sagas-outbox-jobs](sagas-outbox-jobs.md) |
+| 5 | **Sagas & compensation** — booking-confirm and return-settle are persisted state machines + transactional outbox; compensation (refund / release block / close contract) is first-class | `outbox` table is source of truth; JobRunr dispatches | [ADR-008](../decisions/adr-log.md#adr-008--sagas-via-persisted-state-machine--transactional-outbox-dispatched-by-jobrunr) · [sagas-outbox-jobs](sagas-outbox-jobs.md) |
 | 6 | **Idempotency** — every money- or external-system endpoint takes an idempotency key; webhooks are signature-verified and processed once | `IdempotencyService` (Redis/Postgres `idempotency_key`) | [api/reference](../api/reference.md) |
 | 7 | **Compliance adapters** — Tajeer, ZATCA, Wasl, Absher are credential-gated, provider-agnostic adapters behind circuit breakers; dealer gov-credentials live in an encrypted vault, **never** in the app DB, never logged | Resilience4j breakers; Cloud KMS / Secret Manager vault | [ADR-014](../decisions/adr-log.md#adr-014--zatca-phase-2-wrap-the-official-sdk) · [integrations](integrations.md) · [security](security.md) 🟡 |
 
-> **Cardinal rule:** money is never held against a rental that doesn't legally exist — if Tajeer registration fails after payment, the authorization is auto-voided/refunded.
+> **Cardinal rule:** money is never held against a rental that doesn't legally exist — if Tajeer registration fails after payment, the deposit charge is auto-refunded.
 
 ---
 
@@ -93,4 +93,5 @@ Module-by-module detail (services, events, jobs, guards) lives with each area's 
 The architecture is settled; two classes of detail are not (see [STATUS.md](../STATUS.md)):
 - 🟡 **Integration contracts** (Tajeer/ZATCA/Wasl/Absher/Moyasar) — adapters are decided, wire-shapes pending vendor docs.
 - 🟡 **Business-flow detail** (booking/handover/maintenance/pricing) — pending dealer discovery interviews.
-- 🔵 **Web-portal framework** (React vs Next.js) — see [design/frontend-design-system.md](../design/frontend-design-system.md).
+
+The web-portal framework (O-1) is now **resolved** — React (Vite) SPA for the authenticated dealer & admin portals, Next.js for the public/SEO surface; see [design/frontend-design-system.md](../design/frontend-design-system.md).

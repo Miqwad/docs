@@ -2,7 +2,7 @@
 
 The decided backend stack, plus a versioned, CVE-vetted dependency matrix to scaffold sprint 1 against — a point-in-time snapshot dated **2026-06-30**.
 
-> **Status:** ✅ **Decided** for the backend, data, app, payments, auth, and cloud layers. 🔵 **Open** for the web-portal framework only (React SPA vs Next.js — [../STATUS.md](../STATUS.md) O-1). The version pins in **Part B** are a snapshot; re-verify at scaffold ([../decisions/follow-ups.md](../decisions/follow-ups.md) F-5).
+> **Status:** ✅ **Decided** for the backend, data, app, payments, web, and cloud layers (the web-portal framework — O-1 — resolved 2026-07-01: React (Vite) SPA for the dealer & admin portals, Next.js for the public/SEO surface). The **auth provider is decided: Keycloak** (self-hosted, me-central2) — GCIP was ruled out as not fully in-Kingdom (PDPL residency); a final CNTXT residency confirmation is pending but Keycloak stands regardless ([../STATUS.md](../STATUS.md) O-2 / ADR-021). The version pins in **Part B** are a snapshot; re-verify at scaffold ([../decisions/follow-ups.md](../decisions/follow-ups.md) F-5).
 >
 > Decisions trace to the [ADR log](../decisions/adr-log.md) (ADR-001/002/003/005/008/010/011/013/014/015/016/021/022). External readiness checks are tracked as follow-ups F-1 through F-5.
 
@@ -21,9 +21,9 @@ The decided backend stack, plus a versioned, CVE-vetted dependency matrix to sca
 | **Cache / live data / queues** | **Redis** (Memorystore) — availability cache, live-vehicle cache, rate-limit counters, durable queues | ✅ ADR-002 |
 | **Connection pooling** | **HikariCP** (deliberately sized) behind **PgBouncer ≥ 1.24** in transaction-pooling mode | ✅ ADR-002 |
 | **Customer app** | **React Native (Expo)** | ✅ ADR-022 |
-| **Web portals (dealer + admin)** | **React (SPA) vs Next.js — not yet chosen** | 🔵 **Open — O-1** |
+| **Web portals (dealer + admin)** | **React (Vite) SPA** (authenticated app shells); **Next.js** for the public/SEO surface only | ✅ ADR-022 (O-1 resolved) |
 | **Payments** | **Moyasar** (Mada, cards, Apple Pay, STC Pay) via REST behind a provider-agnostic adapter; card data never touches Miqwad | ✅ ADR-015 |
-| **Auth / identity** | Customer phone-OTP; staff/platform RBAC + MFA; JWT carries subject, role, `dealership_id`. **Provider 🔵 Open — Keycloak vs GCIP** (O-2) | 🔵 ADR-021 / O-2 |
+| **Auth / identity** | Customer phone-OTP; staff/platform RBAC + MFA; JWT carries subject, role, `dealership_id`. **Provider: Keycloak** (self-hosted, me-central2; GCIP ruled out — not fully in-Kingdom; CNTXT confirmation pending) | ✅ ADR-021 (O-2) |
 | **Cloud** | **GCP — me-central2 (Dammam)** for PDPL residency | ✅ ADR-010 (F-1) |
 | **Object storage** | **Google Cloud Storage (GCS)** — private buckets, V4 signed URLs | ✅ ADR-009/010 |
 | **Background jobs / outbox dispatch** | **JobRunr** (Postgres-backed, distributed, dashboard) — the single job engine | ✅ ADR-008 |
@@ -41,7 +41,7 @@ The set is the smallest list of boring, production-proven libraries that covers 
 
 **Persistence / ORM.** [core] `spring-boot-starter-data-jpa` (Spring Data JPA + Hibernate) · [core] `spring-boot-starter-flyway` + `flyway-database-postgresql` (the schema's source of truth — exclusion constraint, RLS policies, enums, partitions live here as SQL) · [core] PostgreSQL JDBC driver · [core] HikariCP (Boot-managed) · [add] `hypersistence-utils` (Postgres JSONB, ranges, arrays) · [core] Postgres extensions: `postgis`, `pg_partman` + native declarative partitioning, `btree_gist`, `pgcrypto`, `pg_trgm` (ADR-011).
 
-**Security / auth.** [core] `spring-boot-starter-security` (filter chain, `@PreAuthorize`, encoding) · [core] `spring-boot-starter-oauth2-resource-server` (validates the IdP's JWTs — Keycloak or GCIP — extracts roles + `dealership_id`) · [add] the **IdP — Keycloak or GCIP** (external service; RBAC, MFA — provider 🔵 Open, O-2).
+**Security / auth.** [core] `spring-boot-starter-security` (filter chain, `@PreAuthorize`, encoding) · [core] `spring-boot-starter-oauth2-resource-server` (validates the IdP's JWTs — **Keycloak** — extracts roles + `dealership_id`) · [add] the **IdP — Keycloak** (self-hosted, me-central2; external service; RBAC, MFA — O-2 resolved, ADR-021).
 
 **Caching, events, async.** [core] `spring-boot-starter-data-redis` · [core] `spring-boot-starter-cache` (`@Cacheable` over Redis) · [core] Spring `@Async` + `ApplicationEventPublisher` (in-process fan-out, no dependency) · [add] **Spring Modulith** (build-time module boundaries + event-publication registry — a lightweight outbox) · [core] **Togglz** + a DB `plan`/`subscription`/`entitlement` model (ADR-013).
 
@@ -69,7 +69,7 @@ The set is the smallest list of boring, production-proven libraries that covers 
 
 **Build & ops.** [core] Gradle Kotlin DSL + Spring Boot Gradle plugin + `kotlin-spring`/`kotlin-jpa`/KSP + multi-stage Dockerfile (or Jib) · [add] **Jib** (Dockerfile-less images) · [core] `.editorconfig` + **Detekt** + **ktlint** (Kotlin static analysis + formatting; replaces Spotless/Checkstyle/SpotBugs).
 
-**External services (not libraries):** Keycloak or GCIP (IdP — O-2) · Redis · PostgreSQL (+ read replica) · GCS · Moyasar · FCM + SMS + email.
+**External services (not libraries):** Keycloak (IdP, self-hosted — O-2 resolved) · Redis · PostgreSQL (+ read replica) · GCS · Moyasar · FCM + SMS + email.
 
 ---
 
@@ -130,8 +130,8 @@ The set is the smallest list of boring, production-proven libraries that covers 
 | **springdoc-openapi-starter-webmvc-ui** | **3.0.x** (3.0.1) | ✅ explicit Boot 4 + OpenAPI 3.1 support (runs on JDK 25) | No known high/critical (OSV, 2026-06-30) | springdoc.org; github.com/springdoc/springdoc-openapi | v3.0.1 bundles swagger-ui 5.31.0; built against Boot 4.0.1. Re-check for the 4.1-aligned patch (F-5). |
 | **Spring Modulith** | **2.1.0** | ✅ released alongside Boot 4.1 (2026-06-10) | No known high/critical (OSV, 2026-06-30) | spring.io; InfoQ | 2.1.0 adds `JobRunrEventExternalizer` — pairs directly with the outbox (ADR-008). |
 | **Resilience4j** *(optional)* | `resilience4j-spring-boot4` **2.4.x** | 🟡 Boot-4 artifact exists (since 2.4.0) but was **omitted from the BOM** (issue #2427, fix merged, awaiting release) | No known high/critical (OSV, 2026-06-30) | github.com/resilience4j/resilience4j #2427/#2420 | `[add, optional]` — FW 7 core resilience is the default. Adopt once the BOM fix ships; until then pin the `-spring-boot4` artifact explicitly. **Verify at scaffold (F-5).** |
-| **Elide** | **7.x** (line) | 🟡 **Boot 4 release not confirmed** at writing (autoconfigure documents Boot 3) | No known high/critical (OSV, 2026-06-30) | github.com/yahoo/elide | **F-2:** if no Boot-4-compatible Elide at scaffold, the CRUD surface falls back to **Spring Data REST / plain Spring MVC** behind the same `/v1` base — the core domain never depends on Elide. **Verify at scaffold (F-2).** |
-| **Togglz** | **4.4.0** | 🟡 4.x targets **Spring Boot 3 / Spring 6**; Boot 4 not confirmed | No known high/critical (OSV, 2026-06-30) | togglz.org; github.com/togglz/togglz | **F-3:** if not Boot-4-ready at scaffold, fall back to an own boolean **flag table** behind the same gating interface (flags are not on the critical path). **Verify at scaffold (F-3).** |
+| **Elide** | **7.1.17** (latest, 2026-04-26) | 🟡 **Still Spring Boot 3.5** — elide master pom pins `spring-boot 3.5.14`; **no Boot-4 release yet** (vendor still working on it, confirmed 2026-07-01) | No known high/critical (OSV, 2026-07-01) | github.com/yahoo/elide | **F-2 OPEN:** do **not** pin Elide into the Boot-4 build (it drags Spring 6 / Boot 3.5). Use the interim **Spring Data REST / plain Spring MVC** for JSON:API CRUD behind the same `/v1` base; adopt Elide when its Boot-4 line ships. Core domain never depends on Elide. |
+| **Togglz** | **4.6.2** (2026-05-31) | ✅ **Boot 4 confirmed** — 4.6.x targets **Spring Framework 7.0.2** (Boot 4); min Java 17 | No known high/critical (OSV, 2026-07-01) | togglz.org; github.com/togglz/togglz | **F-3 RESOLVED:** pin `togglz-spring-boot-starter:4.6.2` (+ `togglz-console-spring-boot-starter` for the admin UI); it replaces the interim own-flag-table. NB: 4.5.0 and earlier are still Spring 6 — use 4.6.x. |
 
 ### B.5 Jobs, money/docs, storage
 
@@ -180,7 +180,7 @@ The set is the smallest list of boring, production-proven libraries that covers 
 ## Summary
 
 - **Foundation** is locked to **Spring Boot 4.1.0 / Spring Framework 7 / Kotlin 2.3 / JDK 25 / Gradle 9.6.x**. Everything Spring manages (web, validation, security, oauth2-resource-server, data-jpa, data-redis, cache, actuator, **PostgreSQL 42.7.11, HikariCP 7.0.2, Hibernate 7.4.1, Logback 1.5.34, AssertJ 3.27.7, Micrometer 1.17, Flyway 12.4.0, Jackson 3**) inherits the **Boot 4 BOM** — do not pin those independently.
-- **Three follow-ups remain open by design:** **Elide** (F-2 — no confirmed Boot-4 release; Spring Data REST / MVC fallback), **Togglz** (F-3 — 4.x is Boot-3-targeted; own flag-table fallback), and **Resilience4j** (Boot-4 artifact exists but BOM-omitted, #2427). **JobRunr F-4 is resolved positively** (`jobrunr-spring-boot-4-starter` 8.7.0 ships).
+- **Follow-ups:** **Elide** stays open (F-2 — latest **7.1.17** still targets **Spring Boot 3.5**, no Boot-4 release yet → keep the Spring Data REST / MVC interim). **Togglz F-3 is now resolved** — **4.6.2** targets Spring 7 / Boot 4, so pin it and drop the own-flag-table fallback. **Resilience4j** (Boot-4 artifact exists but BOM-omitted, #2427) stays a scaffold-verify; **JobRunr F-4** resolved (`jobrunr-spring-boot-4-starter` 8.7.0 ships).
 - **Coordinate changes to honor:** `jackson-module-kotlin` → group `tools.jackson.module` (Jackson 3); `kotlin-logging` → `io.github.oshai`; Bucket4j → `com.bucket4j:bucket4j_jdk17-*`; openhtmltopdf → `io.github.openhtmltopdf`; Flyway now needs the **starter** + `flyway-database-postgresql`, not bare `flyway-core`.
 - **This is a 2026-06-30 snapshot.** Re-run latest-version + CVE checks at scaffold ([../decisions/follow-ups.md](../decisions/follow-ups.md) F-5). The 🟡 lines and every "verify at scaffold" note are the explicit re-verification targets.
 

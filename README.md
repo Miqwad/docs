@@ -16,9 +16,9 @@ Every decision and spec carries one of these:
 |---|---|
 | ✅ **Decided** | Settled. Build to it. |
 | 🟡 **Provisional** | Approach is set, but detail will be refined once an external input arrives (vendor API docs, or dealer discovery interviews). Build behind the stable interface; expect the detail to firm up. |
-| 🔵 **Open** | A genuine decision not yet made (e.g. web-portal framework). Do **not** assume an answer. Tracked in [STATUS.md](STATUS.md). |
+| 🔵 **Open** | A genuine decision not yet made (e.g. tier price points O5, or the DR region O10). Do **not** assume an answer. Tracked in [STATUS.md](STATUS.md). |
 
-The backend stack is **Decided**; the external-integration contracts and several business-flow details are **Provisional**; the web-portal framework is **Open**. See [STATUS.md](STATUS.md) for the full register of what is not yet final.
+The backend stack is **Decided** (including the web-portal framework O-1 and the auth provider O-2 — both resolved 2026-07-01: Next.js public / React (Vite) SPA portals; self-hosted **Keycloak**). The external-integration contracts and several business-flow details remain **Provisional**. See [STATUS.md](STATUS.md) for the full register of what is not yet final.
 
 ---
 
@@ -80,7 +80,7 @@ docs/
 
 - **New joiner (any role):** [00-overview.md](00-overview.md) → [architecture/README.md](architecture/README.md) → [engineering/onboarding.md](engineering/onboarding.md) → [STATUS.md](STATUS.md).
 - **Backend engineer:** [architecture/README.md](architecture/README.md) → [data-model.md](architecture/data-model.md) → [api/reference.md](api/reference.md) → [sagas-outbox-jobs.md](architecture/sagas-outbox-jobs.md) → [integrations.md](architecture/integrations.md) → [engineering/stack.md](engineering/stack.md) → [decisions/adr-log.md](decisions/adr-log.md).
-- **Frontend engineer (sole; owns the UI):** [delivery/team/frontend.md](delivery/team/frontend.md) → [api/reference.md](api/reference.md) → [product/use-cases.md](product/use-cases.md) → [design/brand.md](design/brand.md) (tokens). *(No designer: build on an off-the-shelf component kit; bespoke design system deferred. Web-portal framework is low-stakes 🔵 Open — see [STATUS.md](STATUS.md).)*
+- **Frontend engineer (sole; owns the UI):** [delivery/team/frontend.md](delivery/team/frontend.md) → [api/reference.md](api/reference.md) → [product/use-cases.md](product/use-cases.md) → [design/brand.md](design/brand.md) (tokens). *(No designer: build on an off-the-shelf component kit; bespoke design system deferred. Web-portal framework is ✅ decided — React (Vite) SPA for the portals, Next.js for the public/SEO surface — see [STATUS.md](STATUS.md).)*
 - **Product / PM:** [product/requirements.md](product/requirements.md) → [product/use-cases.md](product/use-cases.md) → [product/pricing-packaging.md](product/pricing-packaging.md) → [delivery/](delivery/).
 - **Compliance / integrations:** [architecture/integrations.md](architecture/integrations.md) → [architecture/security.md](architecture/security.md) → [STATUS.md](STATUS.md) (provisional vendor contracts).
 

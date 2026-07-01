@@ -2,7 +2,7 @@
 
 Each record states a decision and the reasoning behind it, so the next engineer inherits the *why*, not just the result. Format: **Status · Date · Context · Decision · Consequences**.
 
-**Statuses:** `Proposed` (recorded, awaiting founder acceptance) · `Accepted` (ratified) · `Open` (a sub-decision not yet made). **All records are `Accepted` (2026-06-30) except [ADR-021](#adr-021--auth) (Auth), which stays `Open` until the identity-provider choice (Keycloak vs GCIP) is made — [STATUS](../STATUS.md) O-2.** See [README.md](README.md) for the index and the consolidation map, and [follow-ups.md](follow-ups.md) for external checks.
+**Statuses:** `Proposed` (recorded, awaiting founder acceptance) · `Accepted` (ratified) · `Open` (a sub-decision not yet made). **All records are `Accepted`** — the former open sub-decisions are now resolved: [ADR-021](#adr-021--auth) (Auth) → **Keycloak, self-hosted in me-central2** (2026-07-01), and [ADR-022](#adr-022--frontend-react-native-expo-customer-app-web-portals-shared-design-system) (Frontend) → **React (Vite) SPA for the authenticated portals, Next.js for the thin public/SEO surface** (2026-07-01) — see [STATUS](../STATUS.md) O-1/O-2. See [README.md](README.md) for the index and the consolidation map, and [follow-ups.md](follow-ups.md) for external checks.
 
 ---
 
@@ -33,7 +33,7 @@ Each record states a decision and the reasoning behind it, so the next engineer 
 
 **Context.** A long tail of many small dealerships; a cross-tenant leak is the worst-case bug. On a coroutines-first runtime the tenant id must survive **suspension and thread hops** to reach both Hibernate's resolver (for `@TenantId`) and the per-transaction `SET LOCAL` (for RLS).
 
-**Decision.** Shared DB / shared schema; every tenant-owned row carries `dealership_id`; isolation enforced **twice** — Hibernate `@TenantId` (auto-applied filter + auto-populated insert) **and** PostgreSQL **Row-Level Security** keyed on a per-transaction session var. `dealership_id` is **always derived from the JWT, never request input**. Tenant context lives in a `ThreadLocal` carried into coroutines as a context element (`threadLocal.asContextElement`), with **`ScopedValue`** (GA in JDK 25) for blocking / `StructuredTaskScope` paths; **background jobs pass `dealership_id` explicitly and never inherit it**; an auth filter sets it and a `finally` clears it on non-coroutine paths. **RLS is the hard backstop** regardless.
+**Decision.** Shared DB / shared schema; every tenant-owned row carries `dealership_id`; isolation enforced **twice** — Hibernate `@TenantId` (auto-applied filter + auto-populated insert) **and** PostgreSQL **Row-Level Security** keyed on a per-transaction session var. `dealership_id` is **always derived from the JWT, never request input**. Tenant context propagates through the coroutine machinery via an **enforced custom `ThreadContextElement`** (not a raw `ThreadLocal`, and not `ScopedValue` alone) so it survives suspension and thread hops to reach both the `@TenantId` resolver and the per-transaction RLS `SET LOCAL`; an auth filter installs it on the request scope and clears it in a `finally`, and **background jobs pass `dealership_id` explicitly and never inherit it**. **RLS is the hard backstop** regardless.
 
 **Consequences.** The developer cannot forget the filter; RLS catches what the ORM filter misses (native queries, an Elide mis-config). Platform-scoped tables (`customer`, `platform_user`, `dealership`, `commission_config`) carry no `dealership_id`.
 
@@ -73,9 +73,9 @@ Each record states a decision and the reasoning behind it, so the next engineer 
 
 **Context.** Booking-confirm (pay → confirm → Tajeer register) and return-settle (return inspection → ZATCA invoice → deposit settle → Tajeer close) span external systems Miqwad does not control.
 
-**Decision.** Model each flow as a **persisted state machine** with a **transactional outbox**; compensation actions (void authorization, release block, refund) are first-class. The **outbox table is the source of truth**; **JobRunr** (Postgres-backed, distributed across instances, retries/backoff, dashboard) is the single job engine and outbox dispatcher — also running reconciliation, telemetry processing, partition maintenance, notifications, payout/commission aggregation, deposit-hold expiry, and import batches. A hand-written state service is the default; Spring Statemachine only if the state logic grows complex.
+**Decision.** Model each flow as a **persisted state machine** with a **transactional outbox**; compensation actions (**refund** the charge, release block, close/void the government contract) are first-class. The **outbox table is the source of truth**; **JobRunr** (Postgres-backed, distributed across instances, retries/backoff, dashboard) is the single job engine and outbox dispatcher — also running reconciliation, telemetry processing, partition maintenance, notifications, payout/commission aggregation, reservation payment-hold expiry (the short pre-payment reaper), and import batches. A hand-written state service is the default; Spring Statemachine only if the state logic grows complex. **The deposit is charged up front, not authorization-held — [ADR-015](#adr-015--payments-moyasar) is canonical for the payment/deposit model, and this record defers to it where they touch.**
 
-**Consequences.** Durable, inspectable saga state; a DB commit and an external call never diverge. **Rule: money is never held against a rental that doesn't legally exist** — if Tajeer registration fails after payment, auto-void/refund. One job engine replaces the earlier multi-tool scheduling proposal.
+**Consequences.** Durable, inspectable saga state; a DB commit and an external call never diverge. **Rule: money is never held against a rental that doesn't legally exist** — if Tajeer registration fails after payment, the compensation is an **auto-refund** of the charge (rental + deposit), never a lingering hold. One job engine replaces the earlier multi-tool scheduling proposal.
 
 ---
 
@@ -144,27 +144,26 @@ Each record states a decision and the reasoning behind it, so the next engineer 
 ---
 
 ## ADR-021 — Auth
-**Status:** 🔵 Open · 2026-06-30 — the auth **requirements** are accepted; the **identity provider (Keycloak vs GCIP, no hybrid) is undecided** — [STATUS](../STATUS.md) O-2
+**Status:** Accepted — pending final CNTXT residency confirmation · 2026-07-01 (requirements accepted 2026-06-30) — provider resolved to **self-hosted Keycloak in me-central2**; [STATUS](../STATUS.md) O-2
 
-**Context.** We host on GCP me-central2 (ADR-010), which makes **Google Cloud Identity Platform (GCIP)** — managed, with native phone-OTP, SMS MFA, and multi-tenancy — a real alternative to a self-hosted **Keycloak**. The choice turns on PDPL data residency and RBAC depth, neither yet settled.
+**Context.** We host on GCP me-central2 (ADR-010), which made **Google Cloud Identity Platform (GCIP)** — managed, with native phone-OTP, SMS MFA, and multi-tenancy — look like a real alternative to a self-hosted **Keycloak**. The choice turned on PDPL data residency and RBAC depth.
 
-**Decided (provider-independent).** Customers authenticate via **phone + OTP** (short-lived access + rotating refresh tokens); dealer staff and platform users get **RBAC + password policy + MFA** for owner/manager/admin roles; the JWT carries subject, role, and `dealership_id`; the API is an **OAuth2 resource server** validating the IdP's JWTs. These hold whichever provider wins.
+**Decided (provider-independent).** Customers authenticate via **phone + OTP** (short-lived access + rotating refresh tokens); dealer staff and platform users get **RBAC + password policy + MFA** for owner/manager/admin roles; the JWT carries subject, role, and `dealership_id`; the API is an **OAuth2 resource server** validating the IdP's JWTs.
 
-**🔵 Open — the identity provider (Keycloak vs GCIP; no hybrid).** Decision criteria:
-- **PDPL residency (decisive):** identity PII must be stored **in-Kingdom**. Keycloak self-hosted in me-central2 guarantees it; **GCIP's me-central2 residency must be verified** (via CNTXT, ties to F-1) before it qualifies.
-- **RBAC depth:** Keycloak ships the owner/manager/branch_agent/accountant role+group model and branch-scoping; on GCIP, RBAC is built app-side on custom claims.
-- **Managed vs self-hosted:** Keycloak is free but self-run (operate/scale/patch); GCIP is managed (per-MAU + per-tenant billing).
-Resolve before auth scaffolding (S1).
+**Decision — identity provider: self-hosted Keycloak in me-central2 (no hybrid).** GCIP was ruled out on the decisive criterion: **it is not fully in-Kingdom, which fails PDPL data residency for identity PII.** Keycloak self-hosted in me-central2 keeps identity PII in-Kingdom by construction, and ships the owner/manager/branch_agent/accountant role+group model with branch-scoping turnkey (on GCIP, RBAC would be built app-side on custom claims). The cost is that Keycloak is self-run (operate/scale/patch) rather than managed — accepted. The team messaged **CNTXT on 2026-07-01** for the final residency confirmation; **Keycloak is the working default regardless of the reply** (a favorable reply does not reopen the choice — it only removes the one caveat on this status). Stand it up at auth scaffolding (S1).
 
-**Consequences.** Tenant scoping and RBAC are enforced server-side from token claims; `dealership_id` is the single source for tenancy (ADR-003). The resource-server design is provider-agnostic, so the choice is localized to the IdP + token-issuance config.
+**Consequences.** Tenant scoping and RBAC are enforced server-side from token claims; `dealership_id` is the single source for tenancy (ADR-003). The resource-server design is provider-agnostic, so this decision is localized to the IdP + token-issuance config; identity PII residency is guaranteed in-Kingdom.
 
 ---
 
 ## ADR-022 — Frontend: React Native (Expo) customer app; web portals; shared design system
-**Status:** Accepted · 2026-06-30 — **web-portal framework is 🔵 Open ([STATUS](../STATUS.md) O-1)**
+**Status:** Accepted · 2026-07-01 (framework choice resolved; supersedes the 2026-06-30 draft that left it Open) — [STATUS](../STATUS.md) O-1
 
-**Decision.** The customer app is **React Native (Expo)** — decided. The dealer and admin **web** portals run on a framework **not yet chosen between React (SPA) and Next.js** (Open — STATUS O-1); the admin portal is kept deliberately thin. A **shared design system** spans all surfaces (Storybook + Style Dictionary tokens from the brand doc), with MapLibre GL maps, react-i18next + full RTL, and TanStack Query + Zustand.
+**Decision.** Three surfaces, each on its fit-for-purpose runtime:
+- **Customer app → React Native (Expo).**
+- **Authenticated dealer & admin portals → React (Vite) SPA.** These are behind login (no SEO need), so a client-rendered SPA is the simpler, lighter choice; the admin portal is kept deliberately thin.
+- **Public / SEO surface → Next.js**, and **only** that surface: an informal marketing/landing site now, and a customer *web* app later when one is warranted. Next.js is not used for the portals.
 
-**Consequences.** One component library across surfaces. The React-vs-Next choice is isolated to the web portals — it does not affect the customer app, the design tokens, or the API — and should be resolved with a short spike before frontend scaffolding (STATUS O-1).
+**Design system.** The **bespoke Storybook + Style-Dictionary design system is deferred to post-V1.** V1 uses an **off-the-shelf RTL component kit themed with Miqwad brand tokens** (from [design/brand.md](../design/brand.md)) across all surfaces — functional, not bespoke. Shared across surfaces regardless: MapLibre GL maps, react-i18next + full RTL, and TanStack Query + Zustand.
 
-**Sequencing (2026-06-30): 3 engineers (2 backend + 1 frontend) + a business/MBA owner, no dedicated UI/UX designer; V1 keeps full scope on the 3-month target.** With one frontend engineer and no designer, all surfaces (customer app + dealer/admin web) are built **functionally on an off-the-shelf component library** (+ minimal brand tokens from doc 01) — the **bespoke Storybook / Style-Dictionary design system is the deferred sacrifice**, not the app or its features. Dealer-OS surfaces lead the build order; the [OpenAPI contract](../api/openapi.yaml) is the frontend's stable seam. This is the top delivery risk (one builder across three surfaces) — see [delivery/project-plan.md](../delivery/project-plan.md).
+**Consequences.** The runtime split is clean — SPA for app-shell portals, Next.js confined to the thin public surface, Expo for mobile — and none of it affects the API or the shared brand tokens. Deferring the bespoke design system trades design polish for delivery speed under a one-frontend-engineer / no-designer team; the off-the-shelf kit + brand tokens carries V1. Dealer-OS surfaces lead the build order; the [OpenAPI contract](../api/openapi.yaml) is the frontend's stable seam. One builder across three surfaces remains the top delivery risk — see [delivery/project-plan.md](../delivery/project-plan.md).

@@ -55,6 +55,7 @@ The single most important scalability constraint. On a coroutines-first runtime 
 ## 6. Database performance rules ✅
 
 - **Per-query budgets** with index coverage on the hot paths (availability lookup, booking by dealer/date, search filters, telemetry by vehicle/time).
+- **Hot-path indexes (IN — no longer deferred):** `branch(city)`, `rate_plan(vehicle_id)`, `vehicle(category)` **partial `WHERE status = 'available'`**, and `booking(customer_id)`. These cover the cache-miss availability rebuild and the customer bookings list (marketplace search itself is still served primarily from the Redis availability cache — §3, not a live cross-join). Each is **validated with `EXPLAIN`** at the load-test step (§7) to confirm the planner uses it.
 - **No N+1 queries** — asserted in tests (fetch plans reviewed; batch / `@EntityGraph` / explicit joins where needed).
 - The `tstzrange` + GiST exclusion constraint and partition pruning on `telemetry_ping` keep the two highest-pressure paths fast.
 - Heavy / reporting queries run on the **read replica**, never the primary.

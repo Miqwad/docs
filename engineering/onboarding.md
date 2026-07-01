@@ -161,7 +161,7 @@ For every framework and library in the stack: a plain-English **what**, **why we
 - **Docs:** [react.dev/learn](https://react.dev/learn)
 - **Key for Miqwad:** package/tier-aware navigation (hide modules the dealer isn't entitled to); shared component library; RTL-first.
 
-> 🔵 The web-portal framework (React SPA vs Next.js) is **Open** — see [../STATUS.md](../STATUS.md) (O-1). The customer app, design tokens, and API are unaffected.
+> ✅ The web-portal framework is **decided** (O-1, resolved 2026-07-01): **React (Vite) SPA** for the authenticated dealer & admin portals, **Next.js** for the public/SEO surface — see [../STATUS.md](../STATUS.md) (O-1). The customer app, design tokens, and API are unaffected.
 
 ### React Native + Expo — customer app
 - **What:** build the iOS+Android app from one React codebase; Expo adds tooling, camera, location, and OTA updates.

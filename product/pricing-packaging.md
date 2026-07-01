@@ -54,6 +54,10 @@ The **free entry tier exists to acquire dealers** (the Shopify-style "solve the 
 - `dealer_direct`, `walk_in`, and `external_aggregator` accrue **zero** commission — the **fairness rule** (the dealer already pays the external aggregator's cut; Miqwad does not double-dip).
 - On refund/cancellation, commission is **reversed proportionally**; the ledger records the reversal.
 
+## Paid promotion / placement — V2 add-on 🔵
+
+**V1 marketplace ranking is organic only** (availability, price, distance, rating — no paid ordering). **Paid promotion/placement is a V2 add-on** and a **third revenue line on top of** the unchanged **marketplace-commission + SaaS-subscription** model. It attaches via a **reserved seam carried from V1 with no rework**: the `vehicle.promotion_rank` field (and its hot-path index) already ships in V1 but is **never read for ordering** until V2 turns it on. When it lands, dealers can pay to boost a listing's placement; the commission and subscription mechanics above are otherwise untouched.
+
 ---
 
 ## Billing & settlement ✅

@@ -84,6 +84,7 @@ erDiagram
     PAYMENT ||--o{ PAYOUT_ITEM : settled_in
     WORK_ORDER }o--|| MAINTENANCE_TYPE : of_type
     PLATFORM_USER ||--o{ DEALERSHIP : approves
+    PLATFORM_USER ||--o{ ADMIN_ACTION : performs
     DEALERSHIP ||--o{ COMMISSION_CONFIG : billed_by
     PLAN ||--o{ SUBSCRIPTION : defines
     DEALERSHIP ||--o| SUBSCRIPTION : subscribes
@@ -103,12 +104,12 @@ erDiagram
 | **Packaging & billing** | `plan`, `subscription`, `entitlement`, `commission_config` (all platform-scoped) |
 | **Fleet** | `vehicle`, `vehicle_category`, `vehicle_image`, `vehicle_document`, `telemetry_ping` (partitioned) |
 | **Availability & pricing** | `rate_plan`, `availability_block` |
-| **Booking & contract** | `booking`, `booking_status_event`, `rental_contract` (Tajeer), `tajeer_link` |
+| **Booking & contract** | `booking`, `booking_status_event`, `booking_saga_state`, `rental_contract` (Tajeer), `tajeer_link` |
 | **Inspection & damage** | `inspection`, `inspection_photo`, `damage_record`, `delivery` |
 | **Payments, invoicing, settlement** | `payment`, `invoice` (ZATCA), `zatca_link`, `payout`, `payout_item`, `ledger_entry` |
 | **Maintenance** | `maintenance_type` (platform ref), `maintenance_schedule`, `work_order` |
 | **Reviews & Saher** | `review` (platform-scoped), `traffic_violation` |
-| **Cross-cutting** | `outbox`, `idempotency_key`, `notification`, `import_batch`, `import_row`, `platform_user` |
+| **Cross-cutting** | `outbox`, `idempotency_key`, `notification`, `import_batch`, `import_row`, `platform_user`, `admin_action` (platform-scoped audit) |
 
 ---
 
@@ -118,7 +119,7 @@ erDiagram
 - **`dealership`** — tenant root. `legal_name`, `display_name`, `cr_number`, `vat_number`, `tga_license_no`, `status`, `tajeer_account_ref`, `zatca_onboarded`, `commission_rate_bps` (per-dealer override), contacts.
 - **`branch`** — `name`, `city`, `address`, geo point (nearest-branch search), `working_hours` (jsonb), `status`.
 - **`staff_user`** — `branch_id` null = all branches; `role` (`owner`/`manager`/`branch_agent`/`accountant`); `auth_subject` → Keycloak.
-- **`customer`** (platform-scoped) — `phone` (unique, OTP login), `national_id_type`, `national_id_masked` (last 4 only), `absher_verified`, `status`.
+- **`customer`** (platform-scoped) — `phone` (unique, OTP login), `national_id_type`, `national_id_masked` (last 4 only), `kyc_status` (`unverified`/`pending`/`verified`/`rejected`), `absher_verified`, `license_expiry` (for renewal gating — the license *number* + full ID live encrypted in `customer_document`), `status`.
 
 > **PII / PDPL.** Full national ID, license number, and document images live encrypted at rest in the restricted `customer_document` table (KSA-resident), column-encrypted with access logging via Cloud KMS envelope encryption. Only masked values appear in operational queries.
 
@@ -138,6 +139,7 @@ erDiagram
 ### 4.4 Booking & contract
 - **`booking`** — `pickup`/`return_branch_id` (one-way capable), `pickup_at`/`return_at`, `status` (`pending` → `confirmed` → `active` → `completed`, branches `cancelled`/`no_show`), `rate_plan_snapshot` (frozen pricing), money fields (`rental`/`deposit`/`vat`/`total_amount`), `commission_bps`/`commission_amount` (marketplace only), `channel` (`marketplace`/`dealer_direct`/`walk_in`/`external_aggregator`) + `channel_source`, `source` (`live`/`imported`).
 - **`booking_status_event`** — audit trail of every transition (`from`/`to_status`, `actor_type`, `actor_id`, `note`).
+- **`booking_saga_state`** — per-booking saga tracking, **separate from `booking.status`**: `booking_id`, `saga_type` (`booking_confirm`/`return_settle`), `step`, `status`, `attempts`, `next_attempt_at`. Holds the multi-step sub-states the sagas need (e.g. `pending_contract`, `settlement_pending`) so `booking.status` stays a clean lifecycle enum and is never overloaded with saga internals. See [sagas-outbox-jobs.md](sagas-outbox-jobs.md).
 - **`rental_contract`** — Tajeer e-contract: `tajeer_contract_ref`, `status` (`draft`/`submitted`/`registered`/`closed`/`failed`), `signed_at`, `raw_payload`, `source` (`imported` ⇒ never re-registered).
 - **`tajeer_link`** — integration audit (one shape with `zatca_link`).
 
@@ -149,7 +151,7 @@ erDiagram
 > **Evidence design.** Photos are mandatory at both handover and return, timestamped and geotagged at capture, hashed for tamper-evidence, retained ≥12 months — turning damage disputes from "he-said/she-said" into evidence, the structural fix for the #1 complaint about incumbents.
 
 ### 4.6 Payments, invoicing & settlement
-- **`payment`** — `type` (`rental`/`deposit_hold`/`deposit_capture`/`deposit_refund`/`extra_charge`/`fine`), `method` (Mada/cards/Apple Pay/STC Pay), `provider` = **Moyasar**, `provider_ref`, `status`.
+- **`payment`** — `type` (`rental`/`deposit_charge`/`deposit_refund`/`extra_charge`/`fine`), `method` (Mada/cards/Apple Pay/STC Pay), `provider` = **Moyasar**, `provider_ref`, `status`. The refundable **deposit is charged up front** (a real Moyasar payment at booking) and **refunded on return** — never an authorization hold (ADR-015).
 - **`invoice`** — ZATCA e-invoice: `type` (`simplified` B2C / `standard` B2B), `direction` (`dealer_to_customer` default, `platform_to_dealer` for Miqwad billing the dealer), `zatca_uuid`, `zatca_hash` (PIH chain), `qr_payload` (TLV base64), `clearance_status`, `source` (`imported` ⇒ never re-cleared).
 - **`payout`** / **`payout_item`** — period settlement to dealership (`gross`/`commission`/`net_amount`).
 - **`ledger_entry`** — **append-only money ledger** (see §6).
@@ -173,6 +175,7 @@ erDiagram
 - **`import_batch`** / **`import_row`** — historical migration. Rows are idempotent (dedup key per entity); bad rows are quarantined, not batch-failing. Imported Tajeer contracts and ZATCA invoices (`source = imported`) are **excluded from registration/clearance sagas and reconciliation** — already filed with the government, never re-submitted.
 - **`review`** (platform-scoped) — `rating` 1–5, `comment`, `status`; affects listing visibility/ranking.
 - **`traffic_violation`** — Saher passthrough: fines during the rental window attributed to the renter on record.
+- **`admin_action`** (platform-scoped audit) — the immutable trail of every platform-team (`/admin/*`) mutation: `id` (UUIDv7), `actor_platform_user_id`, `action`, `target_type`, `target_id`, `before` (jsonb), `after` (jsonb), `reason`, `ip`, `created_at`. Written from **every** `/admin/*` write (dealership approve/suspend/reject, commission/subscription change, platform-initiated refund, …) and **append-only** — same immutability posture as `ledger_entry` (see §6). Platform-scoped: **no `dealership_id`** (like `customer` / `platform_user`).
 
 ### 4.10 Forward-compatible stubs (later releases — schema reserved, no V1 endpoints)
 `promotion`/`coupon` (discount engine), `loyalty_account`/`loyalty_transaction` (rewards), `corporate_account`/`corporate_member` (business accounts). **`wasl_registration`** is conditional — built only if TGA confirms passenger rental fleets must integrate with Wasl (**pending verification**). `review` and `traffic_violation` were promoted into V1 (§4.9).
@@ -196,14 +199,16 @@ CREATE TYPE fuel_type           AS ENUM ('petrol','diesel','hybrid','electric');
 CREATE TYPE block_reason        AS ENUM ('booking','maintenance','manual_hold','transfer');
 CREATE TYPE booking_status      AS ENUM ('pending','confirmed','active','completed','cancelled','no_show','confirmation_failed');
 CREATE TYPE booking_channel     AS ENUM ('marketplace','dealer_direct','walk_in','external_aggregator');
+CREATE TYPE saga_type           AS ENUM ('booking_confirm','return_settle');
+CREATE TYPE saga_status         AS ENUM ('running','pending_contract','settlement_pending','completed','failed');
 CREATE TYPE record_source       AS ENUM ('live','imported');
 CREATE TYPE contract_status     AS ENUM ('draft','submitted','registered','closed','failed');
 CREATE TYPE inspection_type     AS ENUM ('handover','return');
 CREATE TYPE damage_severity     AS ENUM ('minor','moderate','major');
-CREATE TYPE payment_type        AS ENUM ('rental','deposit_hold','deposit_capture','deposit_refund','extra_charge','fine');
+CREATE TYPE payment_type        AS ENUM ('rental','deposit_charge','deposit_refund','extra_charge','fine');
 CREATE TYPE payment_method      AS ENUM ('mada','visa','mastercard','apple_pay','stc_pay');
 CREATE TYPE payment_provider    AS ENUM ('moyasar');
-CREATE TYPE payment_status      AS ENUM ('initiated','authorized','captured','failed','refunded');
+CREATE TYPE payment_status      AS ENUM ('initiated','paid','failed','refunded');
 CREATE TYPE invoice_type        AS ENUM ('simplified','standard');
 CREATE TYPE invoice_direction   AS ENUM ('dealer_to_customer','platform_to_dealer');
 CREATE TYPE clearance_status    AS ENUM ('pending','cleared','reported','failed');
@@ -226,7 +231,7 @@ CREATE TYPE notif_channel       AS ENUM ('push','sms','email','in_app');
 CREATE TYPE notif_status        AS ENUM ('queued','sent','failed');
 ```
 
-> `booking_status` carries a `confirmation_failed` terminal branch (the saga-compensation outcome when confirm fails after payment). `payment_provider` is `moyasar` for V1; the payment adapter is provider-agnostic, so introducing another provider later is a migration + adapter change, not a re-architecture (ADR-015).
+> `booking_status` carries a `confirmation_failed` terminal branch (the saga-compensation outcome when confirm fails after payment); it holds only lifecycle states — **saga sub-states live in `booking_saga_state`** (§4.4), not in this enum. `payment_status` tracks the **charge → refund** lifecycle (`initiated → paid → refunded`, or `failed`); there is no `authorized`/`captured` state because the deposit is **charged up front, not held** — the manual authorize/capture/void flow is deliberately unused (ADR-015). `payment_type` likewise uses `deposit_charge` + `deposit_refund` (no hold/capture). `payment_provider` is `moyasar` for V1; the payment adapter is provider-agnostic, so introducing another provider later is a migration + adapter change, not a re-architecture (ADR-015).
 
 ---
 
@@ -235,10 +240,10 @@ CREATE TYPE notif_status        AS ENUM ('queued','sent','failed');
 All amounts are integer **halalas** (1 SAR = 100) + explicit `currency` — never floats. Money maps to a Kotlin `@JvmInline value class` (type-safe, zero-allocation, impossible to confuse with a raw `Long`). Every money movement is an **immutable ledger entry**; balances are **derived, never edited**.
 
 ```sql
--- Append-only money ledger (ADR-005). Never UPDATE/DELETE.
+-- Append-only money ledger (ADR-005). Immutability is trigger-enforced (see below).
 CREATE TABLE ledger_entry (
   id uuid PRIMARY KEY, dealership_id uuid NOT NULL REFERENCES dealership(id),
-  booking_id uuid, account text NOT NULL,           -- e.g. deposit_hold, commission, payout, vat
+  booking_id uuid, account text NOT NULL,           -- e.g. deposit_charge, deposit_refund, deposit_forfeit, commission, payout, vat
   amount bigint NOT NULL, currency char(3) NOT NULL DEFAULT 'SAR',
   ref_type text, ref_id uuid, memo text,
   created_at timestamptz NOT NULL DEFAULT now()
@@ -246,7 +251,7 @@ CREATE TABLE ledger_entry (
 CREATE INDEX ix_ledger_dealership ON ledger_entry(dealership_id, created_at);
 ```
 
-`ledger_entry` and `outbox` are **append-only** — no service may UPDATE/DELETE them, enforced by code review **and** a prod DB role lacking UPDATE/DELETE on these tables. All `*_amount` columns are `bigint` halalas; add a `CHECK >= 0` per column in the real migration wherever a negative is impossible.
+`ledger_entry`, `outbox`, and `admin_action` are **append-only** — immutability is **enforced by a database `BEFORE UPDATE OR DELETE` trigger that raises an exception**, not merely by convention, code review, or a column comment. A trigger fires for **every** role — including the table owner and any `BYPASSRLS` / superuser connection (import, reconciliation, migrations) — so it closes the gap an RLS policy or a revoked-privilege grant leaves open. (The `revoke UPDATE/DELETE` grant stays as belt-and-suspenders; the trigger is the real guarantee. The migration itself lands later.) All `*_amount` columns are `bigint` halalas; add a `CHECK >= 0` per column in the real migration wherever a negative is impossible.
 
 ---
 
@@ -293,9 +298,9 @@ CREATE POLICY tenant_isolation ON vehicle
   WITH CHECK (dealership_id = app_current_dealership());
 ```
 
-- Same policy on every tenant table: `branch`, `staff_user`, `rate_plan`, `availability_block`, `booking`, `booking_status_event`, `rental_contract`, `inspection`, `inspection_photo`, `damage_record`, `delivery`, `payment`, `invoice`, `payout`, `payout_item`, `ledger_entry`, `maintenance_schedule`, `work_order`, `telemetry_ping`, `traffic_violation`, `subscription`, `entitlement`, `import_batch`, `import_row`, `vehicle_image`, `vehicle_document`, and `vehicle_category` (when dealership-scoped).
+- Same policy on every tenant table: `branch`, `staff_user`, `rate_plan`, `availability_block`, `booking`, `booking_status_event`, `booking_saga_state`, `rental_contract`, `inspection`, `inspection_photo`, `damage_record`, `delivery`, `payment`, `invoice`, `payout`, `payout_item`, `ledger_entry`, `maintenance_schedule`, `work_order`, `telemetry_ping`, `traffic_violation`, `subscription`, `entitlement`, `import_batch`, `import_row`, `vehicle_image`, `vehicle_document`, and `vehicle_category` (when dealership-scoped).
 - The app sets the GUC per transaction: `SET LOCAL app.current_dealership = '<uuid-from-jwt>'` (compatible with PgBouncer transaction pooling; the helper returns NULL → no rows when unset).
-- **Platform-scoped tables** (`dealership`, `customer`, `customer_document`, `platform_user`, `plan`, `commission_config`, `review`, `maintenance_type`, `outbox`, `idempotency_key`, `notification`) are **not** under tenant RLS; access is governed by application role checks (and `customer_document` additionally by column encryption + access logging).
+- **Platform-scoped tables** (`dealership`, `customer`, `customer_document`, `platform_user`, `plan`, `commission_config`, `review`, `maintenance_type`, `outbox`, `idempotency_key`, `notification`, `admin_action`) are **not** under tenant RLS; access is governed by application role checks (and `customer_document` additionally by column encryption + access logging).
 - Jobs that legitimately cross tenants (import, reconciliation) use a dedicated DB role exempt from `FORCE RLS`, used only by audited server jobs.
 
 ### 7.3 Telemetry partitioning ✅ (ADR-011)
@@ -325,6 +330,7 @@ CREATE INDEX ix_branch_geo ON branch USING gist(geo);
 ### 7.5 Saga durability & idempotency ✅
 
 - **`outbox`** — the transactional-outbox source of truth, dispatched by JobRunr; partial index on undispatched rows. **Append-only.**
+- **`booking_saga_state`** — explicit per-booking saga tracking (one row per booking × `saga_type`). Carries the multi-step sub-states (`pending_contract`, `settlement_pending`, …) that a single `booking_status` enum can't hold, so saga internals **never** overload the booking lifecycle enum. Drives retry/backoff (`attempts`, `next_attempt_at`) alongside the outbox.
 - **`idempotency_key`** — `key` PK + stored `response_status`/`response_body`, so every money- or external-system-touching endpoint is processed once.
 
 ```sql
@@ -335,6 +341,21 @@ CREATE TABLE outbox (
   next_attempt_at timestamptz, created_at timestamptz NOT NULL DEFAULT now(), dispatched_at timestamptz
 );
 CREATE INDEX ix_outbox_pending ON outbox(status, next_attempt_at) WHERE status <> 'dispatched';
+
+-- Saga sub-state lives here, NOT on booking.status.
+CREATE TABLE booking_saga_state (
+  id uuid PRIMARY KEY,
+  dealership_id uuid NOT NULL REFERENCES dealership(id),
+  booking_id uuid NOT NULL REFERENCES booking(id),
+  saga_type saga_type NOT NULL,
+  step text NOT NULL,
+  status saga_status NOT NULL DEFAULT 'running',
+  attempts int NOT NULL DEFAULT 0,
+  next_attempt_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT uq_booking_saga UNIQUE (booking_id, saga_type)
+);
+CREATE INDEX ix_saga_pending ON booking_saga_state(status, next_attempt_at) WHERE status IN ('running','pending_contract','settlement_pending');
 
 CREATE TABLE idempotency_key (
   key text PRIMARY KEY, dealership_id uuid, endpoint text,
@@ -378,7 +399,7 @@ Seeds the `plan` catalog (package×tier matrix), the global `commission_config` 
 | 5 | **Commission by channel** — only `booking.channel = marketplace` incurs Miqwad commission; `dealer_direct`, `walk_in`, `external_aggregator` incur none. |
 | 6 | **Entitlement gating** — every dealer action is gated server-side by the resolved `entitlement` (module/limit/package → 402/403). Tenant scope and entitlement are independent checks; both apply. |
 | 7 | **Imported-document guard** — `source = imported` rows on `rental_contract`/`invoice` are already-filed government documents, excluded from registration/clearance sagas and reconciliation; never re-submitted. |
-| 8 | **Append-only tables** — `ledger_entry` and `outbox` are never UPDATEd/DELETEd (code review + a prod DB role without UPDATE/DELETE on them). |
+| 8 | **Append-only tables** — `ledger_entry`, `outbox`, and `admin_action` are never UPDATEd/DELETEd, enforced by a DB `BEFORE UPDATE/DELETE` trigger that raises (fires even for the owner / `BYPASSRLS` roles), with a revoked UPDATE/DELETE grant as defense in depth. |
 
 ---
 

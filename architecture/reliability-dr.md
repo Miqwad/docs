@@ -10,7 +10,7 @@ Related: [performance.md](performance.md) (the same metrics drive the SLOs) · [
 
 ## 1. Observability ✅
 
-Principle: **every request and every external call is traceable end-to-end**, and the metrics that define the SLOs ([performance.md](performance.md)) are the metrics on the dashboards.
+Principle: **every request and every external call is traceable end-to-end**, and the metrics that define the SLOs ([performance.md](performance.md)) are the metrics on the dashboards. **All four pillars — structured JSON logging, correlation/trace IDs, Sentry, and distributed tracing — are in from the start; none is deferred to V1.5.** This is a deliberate build-for-the-long-run decision: an unobservable saga is undebuggable, and retrofitting tracing later is far more expensive than wiring it in on day one.
 
 | Pillar | How |
 |---|---|
@@ -29,7 +29,7 @@ Each external dependency (Tajeer / ZATCA / Wasl / Absher / Moyasar / notificatio
 - **Per-integration circuit breakers** (Spring FW 7 core resilience; Resilience4j optional) — a Tajeer outage must not trip ZATCA. Each adapter has its own breaker, **timeout**, and **bounded retries with backoff + jitter**.
 - **Bulkhead isolation:** concurrency limits per integration so one slow dependency can't exhaust shared threads/pool.
 - **Rate limiting + load shedding:** Bucket4j (app) + Cloud Armor (edge) protect auth/search/booking/telemetry; under overload, non-critical work sheds first.
-- **Transactional outbox + saga compensation + idempotency:** the booking-confirm and return-settle sagas commit state and queue external calls atomically; compensation (void/refund/release) is first-class; every money/external call is idempotent. **Money is never held against a rental that doesn't legally exist** — if Tajeer registration fails after payment, auto-void/refund.
+- **Transactional outbox + saga compensation + idempotency:** the booking-confirm and return-settle sagas commit state and queue external calls atomically; compensation (refund / release) is first-class; every money/external call is idempotent. **Money is never held against a rental that doesn't legally exist** — if Tajeer registration fails after payment, auto-refund.
 - **Reconciliation jobs:** JobRunr jobs reconcile payment/Tajeer/ZATCA state so anything that slips through a transient failure is detected and repaired.
 - **Dead-letter / poison-message handling:** a message that keeps failing is parked in a dead-letter path with an alert, not retried forever.
 
